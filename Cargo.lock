@@ -985,8 +985,11 @@ dependencies = [
 name = "hook-common"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "chrono",
  "http 0.2.11",
+ "metrics",
+ "metrics-exporter-prometheus",
  "serde",
  "serde_derive",
  "sqlx",
@@ -1010,6 +1013,29 @@ dependencies = [
  "sqlx",
  "thiserror",
  "tokio",
+ "url",
+]
+
+[[package]]
+name = "hook-janitor"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "envconfig",
+ "eyre",
+ "futures",
+ "hook-common",
+ "http-body-util",
+ "metrics",
+ "metrics-exporter-prometheus",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
  "url",
 ]
 

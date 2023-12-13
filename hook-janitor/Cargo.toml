@@ -1,5 +1,5 @@
 [package]
-name = "hook-producer"
+name = "hook-janitor"
 version = "0.1.0"
 edition = "2021"
 
@@ -9,6 +9,7 @@ edition = "2021"
 axum = { workspace = true }
 envconfig = { workspace = true }
 eyre = { workspace = true }
+futures = { workspace = true }
 hook-common = { path = "../hook-common" }
 http-body-util = { workspace = true }
 metrics = { workspace = true }
