@@ -147,7 +147,7 @@ impl<'p> WebhookConsumer<'p> {
                 spawn_webhook_job_processing_task(
                     self.client.clone(),
                     semaphore.clone(),
-                    self.retry_policy,
+                    self.retry_policy.clone(),
                     webhook_job,
                 )
                 .await;
@@ -155,10 +155,11 @@ impl<'p> WebhookConsumer<'p> {
         } else {
             loop {
                 let webhook_job = self.wait_for_job().await?;
+
                 spawn_webhook_job_processing_task(
                     self.client.clone(),
                     semaphore.clone(),
-                    self.retry_policy,
+                    self.retry_policy.clone(),
                     webhook_job,
                 )
                 .await;
@@ -282,9 +283,11 @@ async fn process_webhook_job<W: WebhookJob>(
         Err(WebhookError::RetryableRequestError { error, retry_after }) => {
             let retry_interval =
                 retry_policy.time_until_next_retry(webhook_job.attempt() as u32, retry_after);
+            let current_queue = webhook_job.queue();
+            let retry_queue = retry_policy.retry_queue(&current_queue);
 
             match webhook_job
-                .retry(WebhookJobError::from(&error), retry_interval)
+                .retry(WebhookJobError::from(&error), retry_interval, retry_queue)
                 .await
             {
                 Ok(_) => {
