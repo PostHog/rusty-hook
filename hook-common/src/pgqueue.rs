@@ -389,7 +389,7 @@ impl<'c, J: std::marker::Send, M: std::marker::Send> PgQueueJob for PgTransactio
 /// The time until retry will depend on the PgQueue's RetryPolicy.
 pub struct RetryableJob {
     /// A unique id identifying a job.
-    id: i64,
+    pub id: i64,
     /// A number corresponding to the current job attempt.
     pub attempt: i32,
     /// A unique id identifying a job queue.
@@ -450,12 +450,15 @@ RETURNING
 
         Ok(RetriedJob {
             id: self.id,
-            queue: self.retry_queue().to_owned(),
+            table: queue_table.to_owned(),
+            queue: self.queue,
+            retry_queue: self.retry_queue.to_owned(),
         })
     }
 }
 
 /// State a Job is transitioned to after successfully completing.
+#[derive(Debug)]
 pub struct CompletedJob {
     /// A unique id identifying a job.
     id: i64,
@@ -464,14 +467,18 @@ pub struct CompletedJob {
 }
 
 /// State a Job is transitioned to after it has been enqueued for retrying.
+#[derive(Debug)]
 pub struct RetriedJob {
     /// A unique id identifying a job.
     id: i64,
     /// A unique id identifying a job queue.
     pub queue: String,
+    pub retry_queue: Option<String>,
+    pub table: String,
 }
 
 /// State a Job is transitioned to after exhausting all of their attempts.
+#[derive(Debug)]
 pub struct FailedJob<J> {
     /// A unique id identifying a job.
     id: i64,
@@ -482,6 +489,7 @@ pub struct FailedJob<J> {
 }
 
 /// A NewJob to be enqueued into a PgQueue.
+#[derive(Debug)]
 pub struct NewJob<J, M> {
     /// The maximum amount of attempts this NewJob has to complete.
     pub max_attempts: i32,
@@ -884,14 +892,16 @@ mod tests {
         let job_metadata = JobMetadata::default();
         let worker_id = worker_id();
         let new_job = NewJob::new(2, job_metadata, job_parameters, &job_target);
-        let queue_name = "job_queue".to_owned();
+        let table_name = "job_queue".to_owned();
+        let queue_name = "test_can_retry_job_with_remaining_attempts".to_owned();
+
         let retry_policy = RetryPolicy::new(0, time::Duration::from_secs(0))
             .queue(&queue_name)
             .provide();
 
         let queue = PgQueue::new(
-            "test_can_retry_job_with_remaining_attempts",
             &queue_name,
+            &table_name,
             "postgres://posthog:posthog@localhost:15432/test_database",
         )
         .await
@@ -903,7 +913,8 @@ mod tests {
             .await
             .expect("failed to dequeue job")
             .expect("didn't find a job to dequeue");
-        let retry_interval = retry_policy.time_until_next_retry(job.job.attempt as u32, None);
+
+        let retry_interval = retry_policy.retry_interval(job.job.attempt as u32, None);
         let retry_queue = retry_policy.retry_queue(&job.job.queue).to_owned();
         let _ = job
             .retry(
@@ -913,11 +924,86 @@ mod tests {
             )
             .await
             .expect("failed to retry job");
+
         let retried_job: PgJob<JobParameters, JobMetadata> = queue
             .dequeue(&worker_id)
             .await
             .expect("failed to dequeue job")
             .expect("didn't find retried job to dequeue");
+
+        assert_eq!(retried_job.job.attempt, 2);
+        assert!(retried_job.job.attempted_by.contains(&worker_id));
+        assert_eq!(retried_job.job.attempted_by.len(), 2);
+        assert_eq!(retried_job.job.max_attempts, 2);
+        assert_eq!(
+            *retried_job.job.parameters.as_ref(),
+            JobParameters::default()
+        );
+        assert_eq!(retried_job.job.status, JobStatus::Running);
+        assert_eq!(retried_job.job.target, job_target);
+    }
+
+    #[tokio::test]
+    async fn test_can_retry_job_to_different_queue() {
+        let job_target = job_target();
+        let job_parameters = JobParameters::default();
+        let job_metadata = JobMetadata::default();
+        let worker_id = worker_id();
+        let new_job = NewJob::new(2, job_metadata, job_parameters, &job_target);
+        let table_name = "job_queue".to_owned();
+        let queue_name = "test_can_retry_job_to_different_queue".to_owned();
+        let retry_queue_name = "test_can_retry_job_to_different_queue_retry".to_owned();
+
+        let retry_policy = RetryPolicy::new(0, time::Duration::from_secs(0))
+            .queue(&retry_queue_name)
+            .provide();
+
+        let queue = PgQueue::new(
+            &queue_name,
+            &table_name,
+            "postgres://posthog:posthog@localhost:15432/test_database",
+        )
+        .await
+        .expect("failed to connect to queue in local test postgresql database");
+
+        queue.enqueue(new_job).await.expect("failed to enqueue job");
+        let job: PgJob<JobParameters, JobMetadata> = queue
+            .dequeue(&worker_id)
+            .await
+            .expect("failed to dequeue job")
+            .expect("didn't find a job to dequeue");
+
+        let retry_interval = retry_policy.retry_interval(job.job.attempt as u32, None);
+        let retry_queue = retry_policy.retry_queue(&job.job.queue).to_owned();
+        let _ = job
+            .retry(
+                "a very reasonable failure reason",
+                retry_interval,
+                &retry_queue,
+            )
+            .await
+            .expect("failed to retry job");
+
+        let retried_job_not_found: Option<PgJob<JobParameters, JobMetadata>> = queue
+            .dequeue(&worker_id)
+            .await
+            .expect("failed to dequeue job");
+
+        assert!(retried_job_not_found.is_none());
+
+        let queue = PgQueue::new(
+            &retry_queue_name,
+            &table_name,
+            "postgres://posthog:posthog@localhost:15432/test_database",
+        )
+        .await
+        .expect("failed to connect to retry queue in local test postgresql database");
+
+        let retried_job: PgJob<JobParameters, JobMetadata> = queue
+            .dequeue(&worker_id)
+            .await
+            .expect("failed to dequeue job")
+            .expect("job not found in retry queue");
 
         assert_eq!(retried_job.job.attempt, 2);
         assert!(retried_job.job.attempted_by.contains(&worker_id));
@@ -956,7 +1042,9 @@ mod tests {
             .await
             .expect("failed to dequeue job")
             .expect("didn't find a job to dequeue");
-        let retry_interval = retry_policy.time_until_next_retry(job.job.attempt as u32, None);
+
+        let retry_interval = retry_policy.retry_interval(job.job.attempt as u32, None);
+
         job.retry("a very reasonable failure reason", retry_interval, "any")
             .await
             .expect("failed to retry job");

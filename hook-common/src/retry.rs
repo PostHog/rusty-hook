@@ -18,19 +18,28 @@ impl RetryPolicy {
         RetryPolicyBuilder::new(backoff_coefficient, initial_interval)
     }
 
-    /// Calculate the time until the next retry for a given attempt number.
-    pub fn time_until_next_retry(
+    /// Determine interval for retrying a given attempt number.
+    /// If provided, will try to respect a `preferred_retry_interval` as long as it falls within `candidate_interval <= preferred_retry_interval <= maximum_interval`.
+    pub fn retry_interval(
         &self,
         attempt: u32,
         preferred_retry_interval: Option<time::Duration>,
     ) -> time::Duration {
-        let candidate_interval = self.initial_interval * self.backoff_coefficient.pow(attempt);
+        let candidate_interval = self.initial_interval
+            * self
+                .backoff_coefficient
+                .pow(attempt.checked_sub(1).unwrap_or(0));
 
         match (preferred_retry_interval, self.maximum_interval) {
-            (Some(duration), Some(max_interval)) => std::cmp::min(
-                std::cmp::max(std::cmp::min(candidate_interval, max_interval), duration),
-                max_interval,
-            ),
+            (Some(duration), Some(max_interval)) => {
+                let min_interval_allowed = std::cmp::min(candidate_interval, max_interval);
+
+                if min_interval_allowed <= duration && duration <= max_interval {
+                    duration
+                } else {
+                    min_interval_allowed
+                }
+            }
             (Some(duration), None) => std::cmp::max(candidate_interval, duration),
             (None, Some(max_interval)) => std::cmp::min(candidate_interval, max_interval),
             (None, None) => candidate_interval,
@@ -103,5 +112,110 @@ impl RetryPolicyBuilder {
             maximum_interval: self.maximum_interval,
             queue: self.queue.clone(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_constant_retry_interval() {
+        let retry_policy = RetryPolicy::new(1, time::Duration::from_secs(2)).provide();
+        let first_interval = retry_policy.retry_interval(1, None);
+        let second_interval = retry_policy.retry_interval(2, None);
+        let third_interval = retry_policy.retry_interval(3, None);
+
+        assert_eq!(first_interval, time::Duration::from_secs(2));
+        assert_eq!(second_interval, time::Duration::from_secs(2));
+        assert_eq!(third_interval, time::Duration::from_secs(2));
+    }
+
+    #[test]
+    fn test_retry_interval_never_exceeds_maximum() {
+        let retry_policy = RetryPolicy::new(2, time::Duration::from_secs(2))
+            .maximum_interval(time::Duration::from_secs(4))
+            .provide();
+        let first_interval = retry_policy.retry_interval(1, None);
+        let second_interval = retry_policy.retry_interval(2, None);
+        let third_interval = retry_policy.retry_interval(3, None);
+        let fourth_interval = retry_policy.retry_interval(4, None);
+
+        assert_eq!(first_interval, time::Duration::from_secs(2));
+        assert_eq!(second_interval, time::Duration::from_secs(4));
+        assert_eq!(third_interval, time::Duration::from_secs(4));
+        assert_eq!(fourth_interval, time::Duration::from_secs(4));
+    }
+
+    #[test]
+    fn test_retry_interval_increases_with_coefficient() {
+        let retry_policy = RetryPolicy::new(2, time::Duration::from_secs(2)).provide();
+        let first_interval = retry_policy.retry_interval(1, None);
+        let second_interval = retry_policy.retry_interval(2, None);
+        let third_interval = retry_policy.retry_interval(3, None);
+
+        assert_eq!(first_interval, time::Duration::from_secs(2));
+        assert_eq!(second_interval, time::Duration::from_secs(4));
+        assert_eq!(third_interval, time::Duration::from_secs(8));
+    }
+
+    #[test]
+    fn test_retry_interval_respects_preferred() {
+        let retry_policy = RetryPolicy::new(1, time::Duration::from_secs(2)).provide();
+        let preferred = time::Duration::from_secs(999);
+        let first_interval = retry_policy.retry_interval(1, Some(preferred));
+        let second_interval = retry_policy.retry_interval(2, Some(preferred));
+        let third_interval = retry_policy.retry_interval(3, Some(preferred));
+
+        assert_eq!(first_interval, preferred);
+        assert_eq!(second_interval, preferred);
+        assert_eq!(third_interval, preferred);
+    }
+
+    #[test]
+    fn test_retry_interval_ignores_small_preferred() {
+        let retry_policy = RetryPolicy::new(1, time::Duration::from_secs(5)).provide();
+        let preferred = time::Duration::from_secs(2);
+        let first_interval = retry_policy.retry_interval(1, Some(preferred));
+        let second_interval = retry_policy.retry_interval(2, Some(preferred));
+        let third_interval = retry_policy.retry_interval(3, Some(preferred));
+
+        assert_eq!(first_interval, time::Duration::from_secs(5));
+        assert_eq!(second_interval, time::Duration::from_secs(5));
+        assert_eq!(third_interval, time::Duration::from_secs(5));
+    }
+
+    #[test]
+    fn test_retry_interval_ignores_large_preferred() {
+        let retry_policy = RetryPolicy::new(2, time::Duration::from_secs(2))
+            .maximum_interval(time::Duration::from_secs(4))
+            .provide();
+        let preferred = time::Duration::from_secs(10);
+        let first_interval = retry_policy.retry_interval(1, Some(preferred));
+        let second_interval = retry_policy.retry_interval(2, Some(preferred));
+        let third_interval = retry_policy.retry_interval(3, Some(preferred));
+
+        assert_eq!(first_interval, time::Duration::from_secs(2));
+        assert_eq!(second_interval, time::Duration::from_secs(4));
+        assert_eq!(third_interval, time::Duration::from_secs(4));
+    }
+
+    #[test]
+    fn test_returns_retry_queue_if_set() {
+        let retry_queue_name = "retry_queue".to_owned();
+        let retry_policy = RetryPolicy::new(0, time::Duration::from_secs(0))
+            .queue(&retry_queue_name)
+            .provide();
+        let current_queue = "queue".to_owned();
+
+        assert_eq!(retry_policy.retry_queue(&current_queue), retry_queue_name);
+    }
+
+    #[test]
+    fn test_returns_queue_if_retry_queue_not_set() {
+        let retry_policy = RetryPolicy::new(0, time::Duration::from_secs(0)).provide();
+        let current_queue = "queue".to_owned();
+
+        assert_eq!(retry_policy.retry_queue(&current_queue), current_queue);
     }
 }

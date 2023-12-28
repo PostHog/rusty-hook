@@ -282,7 +282,7 @@ async fn process_webhook_job<W: WebhookJob>(
         }
         Err(WebhookError::RetryableRequestError { error, retry_after }) => {
             let retry_interval =
-                retry_policy.time_until_next_retry(webhook_job.attempt() as u32, retry_after);
+                retry_policy.retry_interval(webhook_job.attempt() as u32, retry_after);
             let current_queue = webhook_job.queue();
             let retry_queue = retry_policy.retry_queue(&current_queue);
 
