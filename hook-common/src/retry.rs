@@ -14,7 +14,7 @@ pub struct RetryPolicy {
 }
 
 impl RetryPolicy {
-    pub fn new(backoff_coefficient: u32, initial_interval: time::Duration) -> RetryPolicyBuilder {
+    pub fn build(backoff_coefficient: u32, initial_interval: time::Duration) -> RetryPolicyBuilder {
         RetryPolicyBuilder::new(backoff_coefficient, initial_interval)
     }
 
@@ -119,7 +119,7 @@ mod tests {
 
     #[test]
     fn test_constant_retry_interval() {
-        let retry_policy = RetryPolicy::new(1, time::Duration::from_secs(2)).provide();
+        let retry_policy = RetryPolicy::build(1, time::Duration::from_secs(2)).provide();
         let first_interval = retry_policy.retry_interval(1, None);
         let second_interval = retry_policy.retry_interval(2, None);
         let third_interval = retry_policy.retry_interval(3, None);
@@ -131,7 +131,7 @@ mod tests {
 
     #[test]
     fn test_retry_interval_never_exceeds_maximum() {
-        let retry_policy = RetryPolicy::new(2, time::Duration::from_secs(2))
+        let retry_policy = RetryPolicy::build(2, time::Duration::from_secs(2))
             .maximum_interval(time::Duration::from_secs(4))
             .provide();
         let first_interval = retry_policy.retry_interval(1, None);
@@ -147,7 +147,7 @@ mod tests {
 
     #[test]
     fn test_retry_interval_increases_with_coefficient() {
-        let retry_policy = RetryPolicy::new(2, time::Duration::from_secs(2)).provide();
+        let retry_policy = RetryPolicy::build(2, time::Duration::from_secs(2)).provide();
         let first_interval = retry_policy.retry_interval(1, None);
         let second_interval = retry_policy.retry_interval(2, None);
         let third_interval = retry_policy.retry_interval(3, None);
@@ -159,7 +159,7 @@ mod tests {
 
     #[test]
     fn test_retry_interval_respects_preferred() {
-        let retry_policy = RetryPolicy::new(1, time::Duration::from_secs(2)).provide();
+        let retry_policy = RetryPolicy::build(1, time::Duration::from_secs(2)).provide();
         let preferred = time::Duration::from_secs(999);
         let first_interval = retry_policy.retry_interval(1, Some(preferred));
         let second_interval = retry_policy.retry_interval(2, Some(preferred));
@@ -172,7 +172,7 @@ mod tests {
 
     #[test]
     fn test_retry_interval_ignores_small_preferred() {
-        let retry_policy = RetryPolicy::new(1, time::Duration::from_secs(5)).provide();
+        let retry_policy = RetryPolicy::build(1, time::Duration::from_secs(5)).provide();
         let preferred = time::Duration::from_secs(2);
         let first_interval = retry_policy.retry_interval(1, Some(preferred));
         let second_interval = retry_policy.retry_interval(2, Some(preferred));
@@ -185,7 +185,7 @@ mod tests {
 
     #[test]
     fn test_retry_interval_ignores_large_preferred() {
-        let retry_policy = RetryPolicy::new(2, time::Duration::from_secs(2))
+        let retry_policy = RetryPolicy::build(2, time::Duration::from_secs(2))
             .maximum_interval(time::Duration::from_secs(4))
             .provide();
         let preferred = time::Duration::from_secs(10);
@@ -201,7 +201,7 @@ mod tests {
     #[test]
     fn test_returns_retry_queue_if_set() {
         let retry_queue_name = "retry_queue".to_owned();
-        let retry_policy = RetryPolicy::new(0, time::Duration::from_secs(0))
+        let retry_policy = RetryPolicy::build(0, time::Duration::from_secs(0))
             .queue(&retry_queue_name)
             .provide();
         let current_queue = "queue".to_owned();
@@ -211,7 +211,7 @@ mod tests {
 
     #[test]
     fn test_returns_queue_if_retry_queue_not_set() {
-        let retry_policy = RetryPolicy::new(0, time::Duration::from_secs(0)).provide();
+        let retry_policy = RetryPolicy::build(0, time::Duration::from_secs(0)).provide();
         let current_queue = "queue".to_owned();
 
         assert_eq!(retry_policy.retry_queue(&current_queue), current_queue);

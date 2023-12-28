@@ -891,7 +891,7 @@ mod tests {
         let table_name = "job_queue".to_owned();
         let queue_name = "test_can_retry_job_with_remaining_attempts".to_owned();
 
-        let retry_policy = RetryPolicy::new(0, time::Duration::from_secs(0))
+        let retry_policy = RetryPolicy::build(0, time::Duration::from_secs(0))
             .queue(&queue_name)
             .provide();
 
@@ -946,7 +946,7 @@ mod tests {
         let queue_name = "test_can_retry_job_to_different_queue".to_owned();
         let retry_queue_name = "test_can_retry_job_to_different_queue_retry".to_owned();
 
-        let retry_policy = RetryPolicy::new(0, time::Duration::from_secs(0))
+        let retry_policy = RetryPolicy::build(0, time::Duration::from_secs(0))
             .queue(&retry_queue_name)
             .provide();
 
@@ -1009,7 +1009,7 @@ mod tests {
         let job_metadata = JobMetadata::default();
         let worker_id = worker_id();
         let new_job = NewJob::new(1, job_metadata, job_parameters, &job_target);
-        let retry_policy = RetryPolicy::new(0, time::Duration::from_secs(0)).provide();
+        let retry_policy = RetryPolicy::build(0, time::Duration::from_secs(0)).provide();
 
         let queue = PgQueue::new_from_pool(
             "test_cannot_retry_job_without_remaining_attempts",

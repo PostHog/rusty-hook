@@ -11,7 +11,7 @@ use hook_consumer::error::ConsumerError;
 async fn main() -> Result<(), ConsumerError> {
     let config = Config::init_from_env().expect("Invalid configuration:");
 
-    let retry_policy = RetryPolicy::new(
+    let retry_policy = RetryPolicy::build(
         config.retry_policy.backoff_coefficient,
         config.retry_policy.initial_interval.0,
     )
