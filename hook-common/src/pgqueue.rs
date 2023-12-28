@@ -544,6 +544,17 @@ impl PgQueue {
         Ok(Self { name, pool, table })
     }
 
+    pub async fn new_from_pool(
+        queue_name: &str,
+        table_name: &str,
+        pool: PgPool,
+    ) -> PgQueueResult<Self> {
+        let name = queue_name.to_owned();
+        let table = table_name.to_owned();
+
+        Ok(Self { name, pool, table })
+    }
+
     /// Dequeue a Job from this PgQueue to work on it.
     pub async fn dequeue<
         J: for<'d> serde::Deserialize<'d> + std::marker::Send + std::marker::Unpin + 'static,
@@ -780,21 +791,17 @@ mod tests {
         "https://myhost/endpoint".to_owned()
     }
 
-    #[tokio::test]
-    async fn test_can_dequeue_job() {
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_can_dequeue_job(db: PgPool) {
         let job_target = job_target();
         let job_parameters = JobParameters::default();
         let job_metadata = JobMetadata::default();
         let worker_id = worker_id();
         let new_job = NewJob::new(1, job_metadata, job_parameters, &job_target);
 
-        let queue = PgQueue::new(
-            "test_can_dequeue_job",
-            "job_queue",
-            "postgres://posthog:posthog@localhost:15432/test_database",
-        )
-        .await
-        .expect("failed to connect to local test postgresql database");
+        let queue = PgQueue::new_from_pool("test_can_dequeue_job", "job_queue", db)
+            .await
+            .expect("failed to connect to local test postgresql database");
 
         queue.enqueue(new_job).await.expect("failed to enqueue job");
 
@@ -813,16 +820,12 @@ mod tests {
         assert_eq!(pg_job.job.target, job_target);
     }
 
-    #[tokio::test]
-    async fn test_dequeue_returns_none_on_no_jobs() {
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_dequeue_returns_none_on_no_jobs(db: PgPool) {
         let worker_id = worker_id();
-        let queue = PgQueue::new(
-            "test_dequeue_returns_none_on_no_jobs",
-            "job_queue",
-            "postgres://posthog:posthog@localhost:15432/test_database",
-        )
-        .await
-        .expect("failed to connect to local test postgresql database");
+        let queue = PgQueue::new_from_pool("test_dequeue_returns_none_on_no_jobs", "job_queue", db)
+            .await
+            .expect("failed to connect to local test postgresql database");
 
         let pg_job: Option<PgJob<JobParameters, JobMetadata>> = queue
             .dequeue(&worker_id)
@@ -832,21 +835,17 @@ mod tests {
         assert!(pg_job.is_none());
     }
 
-    #[tokio::test]
-    async fn test_can_dequeue_tx_job() {
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_can_dequeue_tx_job(db: PgPool) {
         let job_target = job_target();
         let job_metadata = JobMetadata::default();
         let job_parameters = JobParameters::default();
         let worker_id = worker_id();
         let new_job = NewJob::new(1, job_metadata, job_parameters, &job_target);
 
-        let queue = PgQueue::new(
-            "test_can_dequeue_tx_job",
-            "job_queue",
-            "postgres://posthog:posthog@localhost:15432/test_database",
-        )
-        .await
-        .expect("failed to connect to local test postgresql database");
+        let queue = PgQueue::new_from_pool("test_can_dequeue_tx_job", "job_queue", db)
+            .await
+            .expect("failed to connect to local test postgresql database");
 
         queue.enqueue(new_job).await.expect("failed to enqueue job");
 
@@ -866,16 +865,13 @@ mod tests {
         assert_eq!(tx_job.job.target, job_target);
     }
 
-    #[tokio::test]
-    async fn test_dequeue_tx_returns_none_on_no_jobs() {
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_dequeue_tx_returns_none_on_no_jobs(db: PgPool) {
         let worker_id = worker_id();
-        let queue = PgQueue::new(
-            "test_dequeue_tx_returns_none_on_no_jobs",
-            "job_queue",
-            "postgres://posthog:posthog@localhost:15432/test_database",
-        )
-        .await
-        .expect("failed to connect to local test postgresql database");
+        let queue =
+            PgQueue::new_from_pool("test_dequeue_tx_returns_none_on_no_jobs", "job_queue", db)
+                .await
+                .expect("failed to connect to local test postgresql database");
 
         let tx_job: Option<PgTransactionJob<'_, JobParameters, JobMetadata>> = queue
             .dequeue_tx(&worker_id)
@@ -885,8 +881,8 @@ mod tests {
         assert!(tx_job.is_none());
     }
 
-    #[tokio::test]
-    async fn test_can_retry_job_with_remaining_attempts() {
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_can_retry_job_with_remaining_attempts(db: PgPool) {
         let job_target = job_target();
         let job_parameters = JobParameters::default();
         let job_metadata = JobMetadata::default();
@@ -899,13 +895,9 @@ mod tests {
             .queue(&queue_name)
             .provide();
 
-        let queue = PgQueue::new(
-            &queue_name,
-            &table_name,
-            "postgres://posthog:posthog@localhost:15432/test_database",
-        )
-        .await
-        .expect("failed to connect to local test postgresql database");
+        let queue = PgQueue::new_from_pool(&queue_name, &table_name, db)
+            .await
+            .expect("failed to connect to local test postgresql database");
 
         queue.enqueue(new_job).await.expect("failed to enqueue job");
         let job: PgJob<JobParameters, JobMetadata> = queue
@@ -943,8 +935,8 @@ mod tests {
         assert_eq!(retried_job.job.target, job_target);
     }
 
-    #[tokio::test]
-    async fn test_can_retry_job_to_different_queue() {
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_can_retry_job_to_different_queue(db: PgPool) {
         let job_target = job_target();
         let job_parameters = JobParameters::default();
         let job_metadata = JobMetadata::default();
@@ -958,13 +950,9 @@ mod tests {
             .queue(&retry_queue_name)
             .provide();
 
-        let queue = PgQueue::new(
-            &queue_name,
-            &table_name,
-            "postgres://posthog:posthog@localhost:15432/test_database",
-        )
-        .await
-        .expect("failed to connect to queue in local test postgresql database");
+        let queue = PgQueue::new_from_pool(&queue_name, &table_name, db.clone())
+            .await
+            .expect("failed to connect to queue in local test postgresql database");
 
         queue.enqueue(new_job).await.expect("failed to enqueue job");
         let job: PgJob<JobParameters, JobMetadata> = queue
@@ -991,13 +979,9 @@ mod tests {
 
         assert!(retried_job_not_found.is_none());
 
-        let queue = PgQueue::new(
-            &retry_queue_name,
-            &table_name,
-            "postgres://posthog:posthog@localhost:15432/test_database",
-        )
-        .await
-        .expect("failed to connect to retry queue in local test postgresql database");
+        let queue = PgQueue::new_from_pool(&retry_queue_name, &table_name, db)
+            .await
+            .expect("failed to connect to retry queue in local test postgresql database");
 
         let retried_job: PgJob<JobParameters, JobMetadata> = queue
             .dequeue(&worker_id)
@@ -1017,9 +1001,9 @@ mod tests {
         assert_eq!(retried_job.job.target, job_target);
     }
 
-    #[tokio::test]
+    #[sqlx::test(migrations = "../migrations")]
     #[should_panic(expected = "failed to retry job")]
-    async fn test_cannot_retry_job_without_remaining_attempts() {
+    async fn test_cannot_retry_job_without_remaining_attempts(db: PgPool) {
         let job_target = job_target();
         let job_parameters = JobParameters::default();
         let job_metadata = JobMetadata::default();
@@ -1027,10 +1011,10 @@ mod tests {
         let new_job = NewJob::new(1, job_metadata, job_parameters, &job_target);
         let retry_policy = RetryPolicy::new(0, time::Duration::from_secs(0)).provide();
 
-        let queue = PgQueue::new(
+        let queue = PgQueue::new_from_pool(
             "test_cannot_retry_job_without_remaining_attempts",
             "job_queue",
-            "postgres://posthog:posthog@localhost:15432/test_database",
+            db,
         )
         .await
         .expect("failed to connect to local test postgresql database");
