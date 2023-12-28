@@ -25,10 +25,8 @@ impl RetryPolicy {
         attempt: u32,
         preferred_retry_interval: Option<time::Duration>,
     ) -> time::Duration {
-        let candidate_interval = self.initial_interval
-            * self
-                .backoff_coefficient
-                .pow(attempt.checked_sub(1).unwrap_or(0));
+        let candidate_interval =
+            self.initial_interval * self.backoff_coefficient.pow(attempt.saturating_sub(1));
 
         match (preferred_retry_interval, self.maximum_interval) {
             (Some(duration), Some(max_interval)) => {
@@ -53,7 +51,7 @@ impl RetryPolicy {
         if let Some(new_queue) = &self.queue {
             new_queue
         } else {
-            &current_queue
+            current_queue
         }
     }
 }

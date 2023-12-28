@@ -109,7 +109,7 @@ impl<J, M> Job<J, M> {
         self.attempt >= self.max_attempts
     }
 
-    fn as_retryable(self) -> RetryableJob {
+    fn retryable(self) -> RetryableJob {
         RetryableJob {
             id: self.id,
             attempt: self.attempt,
@@ -146,7 +146,7 @@ RETURNING
 
         sqlx::query(&base_query)
             .bind(&self.queue)
-            .bind(&self.id)
+            .bind(self.id)
             .execute(executor)
             .await?;
 
@@ -192,7 +192,7 @@ RETURNING
 
         sqlx::query(&base_query)
             .bind(&self.queue)
-            .bind(&self.id)
+            .bind(self.id)
             .bind(&json_error)
             .execute(executor)
             .await?;
@@ -276,7 +276,7 @@ impl<J: std::marker::Send, M: std::marker::Send> PgQueueJob for PgJob<J, M> {
 
         let retried_job = self
             .job
-            .as_retryable()
+            .retryable()
             .queue(queue)
             .retry(error, retry_interval, &self.table, &mut *self.connection)
             .await
@@ -364,7 +364,7 @@ impl<'c, J: std::marker::Send, M: std::marker::Send> PgQueueJob for PgTransactio
 
         let retried_job = self
             .job
-            .as_retryable()
+            .retryable()
             .queue(queue)
             .retry(error, retry_interval, &self.table, &mut *self.transaction)
             .await
@@ -441,10 +441,10 @@ RETURNING
 
         sqlx::query(&base_query)
             .bind(&self.queue)
-            .bind(&self.id)
-            .bind(&retry_interval)
+            .bind(self.id)
+            .bind(retry_interval)
             .bind(&json_error)
-            .bind(&self.retry_queue())
+            .bind(self.retry_queue())
             .execute(executor)
             .await?;
 
@@ -461,7 +461,7 @@ RETURNING
 #[derive(Debug)]
 pub struct CompletedJob {
     /// A unique id identifying a job.
-    id: i64,
+    pub id: i64,
     /// A unique id identifying a job queue.
     pub queue: String,
 }
@@ -470,7 +470,7 @@ pub struct CompletedJob {
 #[derive(Debug)]
 pub struct RetriedJob {
     /// A unique id identifying a job.
-    id: i64,
+    pub id: i64,
     /// A unique id identifying a job queue.
     pub queue: String,
     pub retry_queue: Option<String>,
@@ -481,7 +481,7 @@ pub struct RetriedJob {
 #[derive(Debug)]
 pub struct FailedJob<J> {
     /// A unique id identifying a job.
-    id: i64,
+    pub id: i64,
     /// Any JSON-serializable value to be stored as an error.
     pub error: sqlx::types::Json<J>,
     /// A unique id identifying a job queue.
