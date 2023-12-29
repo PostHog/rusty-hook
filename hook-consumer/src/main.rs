@@ -1,3 +1,4 @@
+//! Consume `PgQueue` jobs to run webhook calls.
 use envconfig::Envconfig;
 
 use hook_common::{

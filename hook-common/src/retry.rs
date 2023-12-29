@@ -1,7 +1,10 @@
+//! # Retry
+//!
+//! Module providing a `RetryPolicy` struct to configure job retrying.
 use std::time;
 
 #[derive(Clone, Debug)]
-/// The retry policy that PgQueue will use to determine how to set scheduled_at when enqueuing a retry.
+/// A retry policy to determine retry parameters for a job.
 pub struct RetryPolicy {
     /// Coefficient to multiply initial_interval with for every past attempt.
     pub backoff_coefficient: u32,
@@ -14,12 +17,13 @@ pub struct RetryPolicy {
 }
 
 impl RetryPolicy {
+    /// Initialize a `RetryPolicyBuilder`.
     pub fn build(backoff_coefficient: u32, initial_interval: time::Duration) -> RetryPolicyBuilder {
         RetryPolicyBuilder::new(backoff_coefficient, initial_interval)
     }
 
-    /// Determine interval for retrying a given attempt number.
-    /// If provided, will try to respect a `preferred_retry_interval` as long as it falls within `candidate_interval <= preferred_retry_interval <= maximum_interval`.
+    /// Determine interval for retrying at a given attempt number.
+    /// If not `None`, this method will respect `preferred_retry_interval` as long as it falls within `candidate_interval <= preferred_retry_interval <= maximum_interval`.
     pub fn retry_interval(
         &self,
         attempt: u32,
@@ -62,6 +66,7 @@ impl Default for RetryPolicy {
     }
 }
 
+/// Builder pattern struct to provide a `RetryPolicy`.
 pub struct RetryPolicyBuilder {
     /// Coefficient to multiply initial_interval with for every past attempt.
     pub backoff_coefficient: u32,
@@ -103,6 +108,7 @@ impl RetryPolicyBuilder {
         self
     }
 
+    /// Provide a `RetryPolicy` according to build parameters provided thus far.
     pub fn provide(&self) -> RetryPolicy {
         RetryPolicy {
             backoff_coefficient: self.backoff_coefficient,

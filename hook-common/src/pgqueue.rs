@@ -109,6 +109,7 @@ impl<J, M> Job<J, M> {
         self.attempt >= self.max_attempts
     }
 
+    /// Consume `Job` to transition it to a `RetryableJob`, i.e. a `Job` that may be retried.
     fn retryable(self) -> RetryableJob {
         RetryableJob {
             id: self.id,
@@ -118,13 +119,14 @@ impl<J, M> Job<J, M> {
         }
     }
 
-    /// Consume Job to complete it.
-    /// This returns a CompletedJob that can be marked as completed by PgQueue.
-    async fn complete<'c, E>(
-        self,
-        queue_table: &str,
-        executor: E,
-    ) -> Result<CompletedJob, sqlx::Error>
+    /// Consume `Job` to complete it.
+    /// A `CompletedJob` is finalized and cannot be used further; it is returned for reporting or inspection.
+    ///
+    /// # Arguments
+    ///
+    /// * `table`: The table where this job will be marked as completed.
+    /// * `executor`: Any sqlx::Executor that can execute the UPDATE query required to mark this `Job` as completed.
+    async fn complete<'c, E>(self, table: &str, executor: E) -> Result<CompletedJob, sqlx::Error>
     where
         E: sqlx::Executor<'c, Database = sqlx::Postgres>,
     {
@@ -141,7 +143,7 @@ WHERE
 RETURNING
     "{0}".*
             "#,
-            queue_table
+            table
         );
 
         sqlx::query(&base_query)
@@ -156,16 +158,18 @@ RETURNING
         })
     }
 
-    /// Consume Job to fail it.
-    /// This returns a FailedJob that can be marked as failed by PgQueue.
+    /// Consume `Job` to fail it.
+    /// A `FailedJob` is finalized and cannot be used further; it is returned for reporting or inspection.
     ///
     /// # Arguments
     ///
     /// * `error`: Any JSON-serializable value to be stored as an error.
+    /// * `table`: The table where this job will be marked as failed.
+    /// * `executor`: Any sqlx::Executor that can execute the UPDATE query required to mark this `Job` as failed.
     async fn fail<'c, E, S>(
         self,
         error: S,
-        queue_table: &str,
+        table: &str,
         executor: E,
     ) -> Result<FailedJob<S>, sqlx::Error>
     where
@@ -187,7 +191,7 @@ WHERE
 RETURNING
     "{0}".*
             "#,
-            &queue_table
+            &table
         );
 
         sqlx::query(&base_query)
@@ -399,20 +403,32 @@ pub struct RetryableJob {
 }
 
 impl RetryableJob {
+    /// Set the queue for a `RetryableJob`.
+    /// If not set, `Job` will be retried to its original queue on calling `retry`.
     fn queue(mut self, queue: &str) -> Self {
         self.retry_queue = Some(queue.to_owned());
         self
     }
 
+    /// Return the queue that a `Job` is to be retried into.
     fn retry_queue(&self) -> &str {
         self.retry_queue.as_ref().unwrap_or(&self.queue)
     }
 
+    /// Consume `Job` to retry it.
+    /// A `RetriedJob` cannot be used further; it is returned for reporting or inspection.
+    ///
+    /// # Arguments
+    ///
+    /// * `error`: Any JSON-serializable value to be stored as an error.
+    /// * `retry_interval`: The duration until the `Job` is to be retried again. Used to set `scheduled_at`.
+    /// * `table`: The table where this job will be marked as completed.
+    /// * `executor`: Any sqlx::Executor that can execute the UPDATE query required to mark this `Job` as completed.
     async fn retry<'c, S, E>(
         self,
         error: S,
         retry_interval: time::Duration,
-        queue_table: &str,
+        table: &str,
         executor: E,
     ) -> Result<RetriedJob, sqlx::Error>
     where
@@ -436,7 +452,7 @@ WHERE
 RETURNING
     "{0}".*
             "#,
-            &queue_table
+            &table
         );
 
         sqlx::query(&base_query)
@@ -450,14 +466,14 @@ RETURNING
 
         Ok(RetriedJob {
             id: self.id,
-            table: queue_table.to_owned(),
+            table: table.to_owned(),
             queue: self.queue,
             retry_queue: self.retry_queue.to_owned(),
         })
     }
 }
 
-/// State a Job is transitioned to after successfully completing.
+/// State a `Job` is transitioned to after successfully completing.
 #[derive(Debug)]
 pub struct CompletedJob {
     /// A unique id identifying a job.
@@ -466,7 +482,7 @@ pub struct CompletedJob {
     pub queue: String,
 }
 
-/// State a Job is transitioned to after it has been enqueued for retrying.
+/// State a `Job` is transitioned to after it has been enqueued for retrying.
 #[derive(Debug)]
 pub struct RetriedJob {
     /// A unique id identifying a job.
@@ -477,7 +493,7 @@ pub struct RetriedJob {
     pub table: String,
 }
 
-/// State a Job is transitioned to after exhausting all of their attempts.
+/// State a `Job` is transitioned to after exhausting all of their attempts.
 #[derive(Debug)]
 pub struct FailedJob<J> {
     /// A unique id identifying a job.
@@ -488,7 +504,7 @@ pub struct FailedJob<J> {
     pub queue: String,
 }
 
-/// A NewJob to be enqueued into a PgQueue.
+/// This struct represents a new job being created to be enqueued into a `PgQueue`.
 #[derive(Debug)]
 pub struct NewJob<J, M> {
     /// The maximum amount of attempts this NewJob has to complete.
@@ -526,14 +542,13 @@ pub struct PgQueue {
 pub type PgQueueResult<T> = std::result::Result<T, PgQueueError>;
 
 impl PgQueue {
-    /// Initialize a new PgQueue backed by table in PostgreSQL.
+    /// Initialize a new PgQueue backed by table in PostgreSQL by intializing a connection pool to the database in `url`.
     ///
     /// # Arguments
     ///
     /// * `queue_name`: A name for the queue we are going to initialize.
     /// * `table_name`: The name for the table the queue will use in PostgreSQL.
     /// * `url`: A URL pointing to where the PostgreSQL database is hosted.
-    /// * `worker_name`: The name of the worker that is operating with this queue.
     pub async fn new(queue_name: &str, table_name: &str, url: &str) -> PgQueueResult<Self> {
         let name = queue_name.to_owned();
         let table = table_name.to_owned();
@@ -544,6 +559,13 @@ impl PgQueue {
         Ok(Self { name, pool, table })
     }
 
+    /// Initialize a new PgQueue backed by table in PostgreSQL from a provided connection pool.
+    ///
+    /// # Arguments
+    ///
+    /// * `queue_name`: A name for the queue we are going to initialize.
+    /// * `table_name`: The name for the table the queue will use in PostgreSQL.
+    /// * `pool`: A database connection pool to be used by this queue.
     pub async fn new_from_pool(
         queue_name: &str,
         table_name: &str,
@@ -555,7 +577,8 @@ impl PgQueue {
         Ok(Self { name, pool, table })
     }
 
-    /// Dequeue a Job from this PgQueue to work on it.
+    /// Dequeue a `Job` from this `PgQueue`.
+    /// The `Job` will be updated to `'running'` status, so any other `dequeue` calls will skip it.
     pub async fn dequeue<
         J: for<'d> serde::Deserialize<'d> + std::marker::Send + std::marker::Unpin + 'static,
         M: for<'d> serde::Deserialize<'d> + std::marker::Send + std::marker::Unpin + 'static,
@@ -633,7 +656,9 @@ RETURNING
         }
     }
 
-    /// Dequeue a Job from this PgQueue to work on it.
+    /// Dequeue a `Job` from this `PgQueue` and hold the transaction.
+    /// Any other `dequeue_tx` calls will skip rows locked, so by holding a transaction we ensure only one worker can dequeue a job.
+    /// Holding a transaction open can have performance implications, but it means no `'running'` state is required.
     pub async fn dequeue_tx<
         'a,
         J: for<'d> serde::Deserialize<'d> + std::marker::Send + std::marker::Unpin + 'static,
@@ -705,8 +730,8 @@ RETURNING
         }
     }
 
-    /// Enqueue a Job into this PgQueue.
-    /// We take ownership of NewJob to enforce a specific NewJob is only enqueued once.
+    /// Enqueue a `NewJob` into this PgQueue.
+    /// We take ownership of `NewJob` to enforce a specific `NewJob` is only enqueued once.
     pub async fn enqueue<
         J: serde::Serialize + std::marker::Sync,
         M: serde::Serialize + std::marker::Sync,
