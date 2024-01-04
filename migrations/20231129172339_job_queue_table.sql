@@ -23,7 +23,7 @@ CREATE TABLE job_queue(
 );
 
 -- Needed for `dequeue` queries
-CREATE INDEX idx_queue_scheduled_at ON job_queue(queue, status, scheduled_at);
+CREATE INDEX idx_queue_scheduled_at ON job_queue(queue, status, scheduled_at, attempt);
 
 -- Needed for UPDATE-ing incomplete jobs with a specific target (i.e. slow destinations)
 CREATE INDEX idx_queue_target ON job_queue(queue, status, target);

@@ -606,7 +606,8 @@ WITH available_in_queue AS (
         AND scheduled_at <= NOW()
         AND queue = $1
     ORDER BY
-        id
+        attempt,
+        scheduled_at
     LIMIT 1
     FOR UPDATE SKIP LOCKED
 )
@@ -687,8 +688,8 @@ WITH available_in_queue AS (
         AND scheduled_at <= NOW()
         AND queue = $1
     ORDER BY
-
-        id
+        attempt,
+        scheduled_at
     LIMIT 1
     FOR UPDATE SKIP LOCKED
 )
