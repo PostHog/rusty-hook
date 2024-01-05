@@ -9,7 +9,7 @@ WORKDIR /sqlx
 ADD bin /sqlx/bin/
 ADD migrations /sqlx/migrations/
 
-COPY --from=builder /app/target/release/sqlx-cli /usr/local/bin
+COPY --from=builder /app/target/release/bin/sqlx /usr/local/bin
 
 RUN chmod +x ./bin/migrate
 
