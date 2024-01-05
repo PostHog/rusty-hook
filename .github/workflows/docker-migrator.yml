@@ -57,7 +57,6 @@ jobs:
           platforms: linux/arm64
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          build-args: BIN=hook-migrator
 
       - name: Hook-migrator image digest
         run: echo ${{ steps.docker_build_hook_migrator.outputs.digest }}
