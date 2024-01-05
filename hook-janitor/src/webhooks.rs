@@ -199,12 +199,12 @@ impl WebhookCleaner {
         let base_query = format!(
             r#"
             SELECT DATE_TRUNC('hour', last_attempt_finished_at) AS hour,
-                   (metadata->>'team_id')::bigint AS team_id,
-                   (metadata->>'plugin_config_id')::bigint AS plugin_config_id,
-                   count(*) as successes
+                (metadata->>'team_id')::bigint AS team_id,
+                (metadata->>'plugin_config_id')::bigint AS plugin_config_id,
+                count(*) as successes
             FROM {0}
             WHERE status = 'completed'
-              AND queue = $1
+                AND queue = $1
             GROUP BY hour, team_id, plugin_config_id
             ORDER BY hour, team_id, plugin_config_id;
             "#,
