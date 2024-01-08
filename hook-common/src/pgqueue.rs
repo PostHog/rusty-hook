@@ -129,8 +129,7 @@ impl<J, M> Job<J, M> {
     where
         E: sqlx::Executor<'c, Database = sqlx::Postgres>,
     {
-        let base_query = format!(
-            r#"
+        let base_query = r#"
 UPDATE
     "job_queue"
 SET
@@ -141,10 +140,9 @@ WHERE
     AND queue = $1
 RETURNING
     "job_queue".*
-            "#,
-        );
+        "#;
 
-        sqlx::query(&base_query)
+        sqlx::query(base_query)
             .bind(&self.queue)
             .bind(self.id)
             .execute(executor)
@@ -169,8 +167,7 @@ RETURNING
         E: sqlx::Executor<'c, Database = sqlx::Postgres>,
     {
         let json_error = sqlx::types::Json(error);
-        let base_query = format!(
-            r#"
+        let base_query = r#"
 UPDATE
     "job_queue"
 SET
@@ -182,10 +179,9 @@ WHERE
     AND queue = $1
 RETURNING
     "job_queue".*
-            "#,
-        );
+        "#;
 
-        sqlx::query(&base_query)
+        sqlx::query(base_query)
             .bind(&self.queue)
             .bind(self.id)
             .bind(&json_error)
@@ -423,8 +419,7 @@ impl RetryableJob {
         E: sqlx::Executor<'c, Database = sqlx::Postgres>,
     {
         let json_error = sqlx::types::Json(error);
-        let base_query = format!(
-            r#"
+        let base_query = r#"
 UPDATE
     "job_queue"
 SET
@@ -438,10 +433,9 @@ WHERE
     AND queue = $1
 RETURNING
     "job_queue".*
-            "#,
-        );
+        "#;
 
-        sqlx::query(&base_query)
+        sqlx::query(base_query)
             .bind(&self.queue)
             .bind(self.id)
             .bind(retry_interval)
@@ -568,8 +562,7 @@ impl PgQueue {
 
         // The query that follows uses a FOR UPDATE SKIP LOCKED clause.
         // For more details on this see: 2ndquadrant.com/en/blog/what-is-select-skip-locked-for-in-postgresql-9-5.
-        let base_query = format!(
-            r#"
+        let base_query = r#"
 WITH available_in_queue AS (
     SELECT
         id
@@ -598,10 +591,9 @@ WHERE
     "job_queue".id = available_in_queue.id
 RETURNING
     "job_queue".*
-            "#,
-        );
+        "#;
 
-        let query_result: Result<Job<J, M>, sqlx::Error> = sqlx::query_as(&base_query)
+        let query_result: Result<Job<J, M>, sqlx::Error> = sqlx::query_as(base_query)
             .bind(&self.name)
             .bind(attempted_by)
             .fetch_one(&mut *connection)
@@ -645,8 +637,7 @@ RETURNING
 
         // The query that follows uses a FOR UPDATE SKIP LOCKED clause.
         // For more details on this see: 2ndquadrant.com/en/blog/what-is-select-skip-locked-for-in-postgresql-9-5.
-        let base_query = format!(
-            r#"
+        let base_query = r#"
 WITH available_in_queue AS (
     SELECT
         id
@@ -675,10 +666,9 @@ WHERE
     "job_queue".id = available_in_queue.id
 RETURNING
     "job_queue".*
-            "#,
-        );
+        "#;
 
-        let query_result: Result<Job<J, M>, sqlx::Error> = sqlx::query_as(&base_query)
+        let query_result: Result<Job<J, M>, sqlx::Error> = sqlx::query_as(base_query)
             .bind(&self.name)
             .bind(attempted_by)
             .fetch_one(&mut *tx)
@@ -709,16 +699,14 @@ RETURNING
         job: NewJob<J, M>,
     ) -> PgQueueResult<()> {
         // TODO: Escaping. I think sqlx doesn't support identifiers.
-        let base_query = format!(
-            r#"
+        let base_query = r#"
 INSERT INTO job_queue
     (attempt, created_at, scheduled_at, max_attempts, metadata, parameters, queue, status, target)
 VALUES
     (0, NOW(), NOW(), $1, $2, $3, $4, 'available'::job_status, $5)
-            "#,
-        );
+        "#;
 
-        sqlx::query(&base_query)
+        sqlx::query(base_query)
             .bind(job.max_attempts)
             .bind(&job.metadata)
             .bind(&job.parameters)

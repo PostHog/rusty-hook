@@ -189,8 +189,7 @@ impl WebhookCleaner {
     }
 
     async fn get_completed_rows(&self, tx: &mut SerializableTxn<'_>) -> Result<Vec<CompletedRow>> {
-        let base_query = format!(
-            r#"
+        let base_query = r#"
             SELECT DATE_TRUNC('hour', last_attempt_finished_at) AS hour,
                 (metadata->>'team_id')::bigint AS team_id,
                 (metadata->>'plugin_config_id')::bigint AS plugin_config_id,
@@ -200,10 +199,9 @@ impl WebhookCleaner {
                 AND queue = $1
             GROUP BY hour, team_id, plugin_config_id
             ORDER BY hour, team_id, plugin_config_id;
-            "#,
-        );
+        "#;
 
-        let rows = sqlx::query_as::<_, CompletedRow>(&base_query)
+        let rows = sqlx::query_as::<_, CompletedRow>(base_query)
             .bind(&self.queue_name)
             .fetch_all(&mut *tx.0)
             .await
@@ -213,8 +211,7 @@ impl WebhookCleaner {
     }
 
     async fn get_failed_rows(&self, tx: &mut SerializableTxn<'_>) -> Result<Vec<FailedRow>> {
-        let base_query = format!(
-            r#"
+        let base_query = r#"
             SELECT DATE_TRUNC('hour', last_attempt_finished_at) AS hour,
                    (metadata->>'team_id')::bigint AS team_id,
                    (metadata->>'plugin_config_id')::bigint AS plugin_config_id,
@@ -225,10 +222,9 @@ impl WebhookCleaner {
               AND queue = $1
             GROUP BY hour, team_id, plugin_config_id, last_error
             ORDER BY hour, team_id, plugin_config_id, last_error;
-            "#,
-        );
+        "#;
 
-        let rows = sqlx::query_as::<_, FailedRow>(&base_query)
+        let rows = sqlx::query_as::<_, FailedRow>(base_query)
             .bind(&self.queue_name)
             .fetch_all(&mut *tx.0)
             .await
@@ -283,15 +279,13 @@ impl WebhookCleaner {
     async fn delete_observed_rows(&self, tx: &mut SerializableTxn<'_>) -> Result<u64> {
         // This DELETE is only safe because we are in serializable isolation mode, see the note
         // in `start_serializable_txn`.
-        let base_query = format!(
-            r#"
+        let base_query = r#"
             DELETE FROM job_queue
             WHERE status IN ('failed', 'completed')
               AND queue = $1;
-            "#,
-        );
+        "#;
 
-        let result = sqlx::query(&base_query)
+        let result = sqlx::query(base_query)
             .bind(&self.queue_name)
             .execute(&mut *tx.0)
             .await
@@ -450,7 +444,6 @@ mod tests {
 
         let webhook_cleaner = WebhookCleaner::new_from_pool(
             &"webhooks",
-            &"job_queue",
             db,
             mock_producer,
             APP_METRICS_TOPIC.to_owned(),
@@ -632,14 +625,13 @@ mod tests {
         let (_, mock_producer) = create_mock_kafka().await;
         let webhook_cleaner = WebhookCleaner::new_from_pool(
             &"webhooks",
-            &"job_queue",
             db.clone(),
             mock_producer,
             APP_METRICS_TOPIC.to_owned(),
         )
         .expect("unable to create webhook cleaner");
 
-        let queue = PgQueue::new_from_pool("webhooks", "job_queue", db.clone())
+        let queue = PgQueue::new_from_pool("webhooks", db.clone())
             .await
             .expect("failed to connect to local test postgresql database");
 
