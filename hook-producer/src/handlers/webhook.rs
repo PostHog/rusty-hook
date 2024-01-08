@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use axum::{extract::State, http::StatusCode, Json};
 use hook_common::webhook::{WebhookJobMetadata, WebhookJobParameters};
 use serde_derive::Deserialize;
@@ -61,7 +63,12 @@ pub async fn post(
         url_hostname.as_str(),
     );
 
+    let start_time = Instant::now();
+
     pg_queue.enqueue(job).await.map_err(internal_error)?;
+
+    let elapsed_time = start_time.elapsed().as_secs_f64();
+    metrics::histogram!("webhook_producer_enqueue").record(elapsed_time);
 
     Ok(Json(WebhookPostResponse { error: None }))
 }
