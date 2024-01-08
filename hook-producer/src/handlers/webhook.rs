@@ -107,6 +107,7 @@ mod tests {
     use axum::{
         body::Body,
         http::{self, Request, StatusCode},
+        Router,
     };
     use hook_common::pgqueue::PgQueue;
     use hook_common::webhook::{HttpMethod, WebhookJobParameters};
@@ -115,7 +116,7 @@ mod tests {
     use std::collections;
     use tower::ServiceExt; // for `call`, `oneshot`, and `ready`
 
-    use crate::handlers::app;
+    use crate::handlers::app::add_routes;
 
     #[sqlx::test(migrations = "../migrations")]
     async fn webhook_success(db: PgPool) {
@@ -123,7 +124,7 @@ mod tests {
             .await
             .expect("failed to construct pg_queue");
 
-        let app = app(pg_queue, None);
+        let app = add_routes(Router::new(), pg_queue);
 
         let mut headers = collections::HashMap::new();
         headers.insert("Content-Type".to_owned(), "application/json".to_owned());
@@ -167,7 +168,7 @@ mod tests {
             .await
             .expect("failed to construct pg_queue");
 
-        let app = app(pg_queue, None);
+        let app = add_routes(Router::new(), pg_queue);
 
         let response = app
             .oneshot(
@@ -206,7 +207,7 @@ mod tests {
             .await
             .expect("failed to construct pg_queue");
 
-        let app = app(pg_queue, None);
+        let app = add_routes(Router::new(), pg_queue);
 
         let response = app
             .oneshot(
@@ -229,7 +230,7 @@ mod tests {
             .await
             .expect("failed to construct pg_queue");
 
-        let app = app(pg_queue, None);
+        let app = add_routes(Router::new(), pg_queue);
 
         let response = app
             .oneshot(
@@ -252,7 +253,7 @@ mod tests {
             .await
             .expect("failed to construct pg_queue");
 
-        let app = app(pg_queue, None);
+        let app = add_routes(Router::new(), pg_queue);
 
         let bytes: Vec<u8> = vec![b'a'; 1_000_000 * 2];
         let long_string = String::from_utf8_lossy(&bytes);
