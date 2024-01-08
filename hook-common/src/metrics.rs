@@ -21,7 +21,10 @@ pub fn setup_metrics_router() -> Router {
     let recorder_handle = setup_metrics_recorder();
 
     Router::new()
-        .route("/metrics", get(recorder_handle.render()))
+        .route(
+            "/metrics",
+            get(move || std::future::ready(recorder_handle.render())),
+        )
         .layer(axum::middleware::from_fn(track_metrics))
 }
 
