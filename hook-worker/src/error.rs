@@ -23,7 +23,7 @@ pub enum WebhookError {
 
 /// Enumeration of errors related to initialization and consumption of webhook jobs.
 #[derive(Error, Debug)]
-pub enum ConsumerError {
+pub enum WorkerError {
     #[error("timed out while waiting for jobs to be available")]
     TimeoutError,
     #[error("an error occurred in the underlying queue")]
