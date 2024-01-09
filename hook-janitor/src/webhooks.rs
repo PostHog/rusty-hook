@@ -40,6 +40,8 @@ pub enum WebhookCleanerError {
     DeleteRowsError { error: sqlx::Error },
     #[error("attempted to delete a different number of rows than expected")]
     DeleteConsistencyError,
+    #[error("failed to rollback txn: {error}")]
+    RollbackTxnError { error: sqlx::Error },
     #[error("failed to commit txn: {error}")]
     CommitTxnError { error: sqlx::Error },
 }
@@ -325,6 +327,14 @@ impl WebhookCleaner {
         Ok(result.rows_affected())
     }
 
+    async fn rollback_txn(&self, tx: SerializableTxn<'_>) -> Result<()> {
+        tx.0.rollback()
+            .await
+            .map_err(|e| WebhookCleanerError::RollbackTxnError { error: e })?;
+
+        Ok(())
+    }
+
     async fn commit_txn(&self, tx: SerializableTxn<'_>) -> Result<()> {
         tx.0.commit()
             .await
@@ -379,6 +389,8 @@ impl WebhookCleaner {
                     failed_row_count = failed_row_count,
                     "WebhookCleaner::cleanup attempted to delete a different number of rows than expected"
                 );
+
+                self.rollback_txn(tx).await?;
 
                 return Err(WebhookCleanerError::DeleteConsistencyError);
             }
