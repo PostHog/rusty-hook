@@ -50,7 +50,7 @@ async fn main() {
         CleanerModeName::Webhooks => {
             let kafka_producer = create_kafka_producer(&config.kafka)
                 .await
-                .expect("failed to create kafka api");
+                .expect("failed to create kafka producer");
 
             Box::new(
                 WebhookCleaner::new(

@@ -3,7 +3,7 @@ use std::time;
 use hook_common::pgqueue;
 use thiserror::Error;
 
-/// Enumeration of errors related to webhook job processing in the WebhookConsumer.
+/// Enumeration of errors related to webhook job processing in the WebhookWorker.
 #[derive(Error, Debug)]
 pub enum WebhookError {
     #[error("{0} is not a valid HttpMethod")]
