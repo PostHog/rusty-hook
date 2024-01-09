@@ -30,10 +30,10 @@ pub struct Config {
 #[derive(Envconfig, Clone)]
 pub struct KafkaConfig {
     #[envconfig(default = "20")]
-    pub kafka_producer_linger_ms: u32, // Maximum time between api batches during low traffic
+    pub kafka_producer_linger_ms: u32, // Maximum time between producer batches during low traffic
 
     #[envconfig(default = "400")]
-    pub kafka_producer_queue_mib: u32, // Size of the in-memory api queue in mebibytes
+    pub kafka_producer_queue_mib: u32, // Size of the in-memory producer queue in mebibytes
 
     #[envconfig(default = "20000")]
     pub kafka_message_timeout_ms: u32, // Time before we stop retrying producing a message: 20 seconds
