@@ -493,7 +493,7 @@ mod tests {
             cluster,
             create_kafka_producer(&config)
                 .await
-                .expect("failed to create mocked kafka api"),
+                .expect("failed to create mocked kafka producer"),
         )
     }
 
@@ -511,22 +511,26 @@ mod tests {
 
     #[sqlx::test(migrations = "../migrations", fixtures("webhook_cleanup"))]
     async fn test_cleanup_impl(db: PgPool) {
-        let (mock_cluster, mock_api) = create_mock_kafka().await;
+        let (mock_cluster, mock_producer) = create_mock_kafka().await;
         mock_cluster
             .create_topic(APP_METRICS_TOPIC, 1, 1)
             .expect("failed to create mock app_metrics topic");
 
-        let worker: StreamConsumer = ClientConfig::new()
+        let consumer: StreamConsumer = ClientConfig::new()
             .set("bootstrap.servers", mock_cluster.bootstrap_servers())
             .set("group.id", "mock")
             .set("auto.offset.reset", "earliest")
             .create()
-            .expect("failed to create mock worker");
-        worker.subscribe(&[APP_METRICS_TOPIC]).unwrap();
+            .expect("failed to create mock consumer");
+        consumer.subscribe(&[APP_METRICS_TOPIC]).unwrap();
 
-        let webhook_cleaner =
-            WebhookCleaner::new_from_pool(&"webhooks", db, mock_api, APP_METRICS_TOPIC.to_owned())
-                .expect("unable to create webhook cleaner");
+        let webhook_cleaner = WebhookCleaner::new_from_pool(
+            &"webhooks",
+            db,
+            mock_producer,
+            APP_METRICS_TOPIC.to_owned(),
+        )
+        .expect("unable to create webhook cleaner");
 
         let cleanup_stats = webhook_cleaner
             .cleanup_impl()
@@ -539,7 +543,7 @@ mod tests {
 
         let mut received_app_metrics = Vec::new();
         for _ in 0..(cleanup_stats.completed_agg_row_count + cleanup_stats.failed_agg_row_count) {
-            let kafka_msg = worker.recv().await.unwrap();
+            let kafka_msg = consumer.recv().await.unwrap();
             let payload_str = String::from_utf8(kafka_msg.payload().unwrap().to_vec()).unwrap();
             let app_metric: AppMetric = serde_json::from_str(&payload_str).unwrap();
             received_app_metrics.push(app_metric);
@@ -700,11 +704,11 @@ mod tests {
 
     #[sqlx::test(migrations = "../migrations", fixtures("webhook_cleanup"))]
     async fn test_serializable_isolation(db: PgPool) {
-        let (_, mock_api) = create_mock_kafka().await;
+        let (_, mock_producer) = create_mock_kafka().await;
         let webhook_cleaner = WebhookCleaner::new_from_pool(
             &"webhooks",
             db.clone(),
-            mock_api,
+            mock_producer,
             APP_METRICS_TOPIC.to_owned(),
         )
         .expect("unable to create webhook cleaner");
