@@ -27,3 +27,5 @@ CREATE INDEX idx_queue_scheduled_at ON job_queue(queue, status, scheduled_at, at
 
 -- Needed for UPDATE-ing incomplete jobs with a specific target (i.e. slow destinations)
 CREATE INDEX idx_queue_target ON job_queue(queue, status, target);
+
+SET idle_in_transaction_session_timeout='2min';
