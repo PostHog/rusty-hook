@@ -280,7 +280,7 @@ async fn process_webhook_job<W: WebhookJob>(
                 .fail(WebhookJobError::new_parse(&e.to_string()))
                 .await
                 .map_err(|job_error| {
-                    metrics::counter!("webhook_jobs_failed", &labels).increment(1);
+                    metrics::counter!("webhook_jobs_database_error", &labels).increment(1);
                     WorkerError::PgJobError(job_error.to_string())
                 })?;
 
@@ -293,7 +293,7 @@ async fn process_webhook_job<W: WebhookJob>(
                 .fail(WebhookJobError::new_parse(&e))
                 .await
                 .map_err(|job_error| {
-                    metrics::counter!("webhook_jobs_failed", &labels).increment(1);
+                    metrics::counter!("webhook_jobs_database_error", &labels).increment(1);
                     WorkerError::PgJobError(job_error.to_string())
                 })?;
 
@@ -306,7 +306,7 @@ async fn process_webhook_job<W: WebhookJob>(
                 .fail(WebhookJobError::new_parse(&e.to_string()))
                 .await
                 .map_err(|job_error| {
-                    metrics::counter!("webhook_jobs_failed", &labels).increment(1);
+                    metrics::counter!("webhook_jobs_database_error", &labels).increment(1);
                     WorkerError::PgJobError(job_error.to_string())
                 })?;
 
@@ -336,7 +336,7 @@ async fn process_webhook_job<W: WebhookJob>(
                         .fail(WebhookJobError::from(&error))
                         .await
                         .map_err(|job_error| {
-                            metrics::counter!("webhook_jobs_failed", &labels).increment(1);
+                            metrics::counter!("webhook_jobs_database_error", &labels).increment(1);
                             WorkerError::PgJobError(job_error.to_string())
                         })?;
 
@@ -344,7 +344,11 @@ async fn process_webhook_job<W: WebhookJob>(
 
                     Ok(())
                 }
-                Err(job_error) => Err(WorkerError::PgJobError(job_error.to_string())),
+                Err(job_error) => {
+                    metrics::counter!("webhook_jobs_database_error", &labels).increment(1);
+
+                    Err(WorkerError::PgJobError(job_error.to_string()))
+                }
             }
         }
         Err(WebhookError::NonRetryableRetryableRequestError(error)) => {
@@ -352,7 +356,7 @@ async fn process_webhook_job<W: WebhookJob>(
                 .fail(WebhookJobError::from(&error))
                 .await
                 .map_err(|job_error| {
-                    metrics::counter!("webhook_jobs_failed", &labels).increment(1);
+                    metrics::counter!("webhook_jobs_database_error", &labels).increment(1);
                     WorkerError::PgJobError(job_error.to_string())
                 })?;
 
