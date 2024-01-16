@@ -111,8 +111,9 @@ struct FailedRow {
 
 #[derive(sqlx::FromRow, Debug)]
 struct QueueDepth {
-    oldest_created_at: DateTime<Utc>,
+    oldest_created_at_untried: DateTime<Utc>,
     count_untried: i64,
+    oldest_created_at_retries: DateTime<Utc>,
     count_retries: i64,
 }
 
@@ -192,13 +193,14 @@ impl WebhookCleaner {
             .map_err(|e| WebhookCleanerError::StartTxnError { error: e })?;
 
         let base_query = r#"
-            SELECT
-                COALESCE(MIN(created_at), now()) AS oldest_created_at,
-                SUM(CASE WHEN attempt = 0 THEN 1 ELSE 0 END) AS count_untried,
-                SUM(CASE WHEN attempt > 0 THEN 1 ELSE 0 END) AS count_retries
-            FROM job_queue
-            WHERE status = 'available'
-              AND queue = $1;
+        SELECT
+            COALESCE(MIN(CASE WHEN attempt = 0 THEN created_at END), now()) AS oldest_created_at_untried,
+            SUM(CASE WHEN attempt = 0 THEN 1 ELSE 0 END) AS count_untried,
+            COALESCE(MIN(CASE WHEN attempt > 0 THEN created_at END), now()) AS oldest_created_at_retries,
+            SUM(CASE WHEN attempt > 0 THEN 1 ELSE 0 END) AS count_retries
+        FROM job_queue
+        WHERE status = 'available'
+          AND queue = $1;
         "#;
 
         let row = sqlx::query_as::<_, QueueDepth>(base_query)
@@ -390,10 +392,14 @@ impl WebhookCleaner {
         // future if necessary.
 
         let queue_depth = self.get_queue_depth().await?;
-        metrics::gauge!("queue_depth_oldest_created_at")
-            .set(queue_depth.oldest_created_at.timestamp() as f64);
-        metrics::gauge!("queue_depth_untried").set(queue_depth.count_untried as f64);
-        metrics::gauge!("queue_depth_retries").set(queue_depth.count_retries as f64);
+        metrics::gauge!("queue_depth_oldest_created_at_untried")
+            .set(queue_depth.oldest_created_at_untried.timestamp() as f64);
+        metrics::gauge!("queue_depth", &[("status", "untried")])
+            .set(queue_depth.count_untried as f64);
+        metrics::gauge!("queue_depth_oldest_created_at_retries")
+            .set(queue_depth.oldest_created_at_retries.timestamp() as f64);
+        metrics::gauge!("queue_depth", &[("status", "retries")])
+            .set(queue_depth.count_retries as f64);
 
         let mut tx = self.start_serializable_txn().await?;
 
