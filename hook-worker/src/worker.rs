@@ -76,6 +76,8 @@ pub struct WebhookWorker<'p> {
     max_concurrent_jobs: usize,
     /// The retry policy used to calculate retry intervals when a job fails with a retryable error.
     retry_policy: RetryPolicy,
+    /// The liveness check handle, to call on a schedule to report healthy
+    liveness: HealthHandle,
 }
 
 impl<'p> WebhookWorker<'p> {
@@ -86,6 +88,7 @@ impl<'p> WebhookWorker<'p> {
         request_timeout: time::Duration,
         max_concurrent_jobs: usize,
         retry_policy: RetryPolicy,
+        liveness: HealthHandle,
     ) -> Self {
         let mut headers = header::HeaderMap::new();
         headers.insert(
@@ -107,6 +110,7 @@ impl<'p> WebhookWorker<'p> {
             client,
             max_concurrent_jobs,
             retry_policy,
+            liveness,
         }
     }
 
@@ -118,6 +122,7 @@ impl<'p> WebhookWorker<'p> {
 
         loop {
             interval.tick().await;
+            self.liveness.report_healthy().await;
 
             if let Some(job) = self.queue.dequeue(&self.name).await? {
                 return Ok(job);
@@ -133,6 +138,7 @@ impl<'p> WebhookWorker<'p> {
 
         loop {
             interval.tick().await;
+            self.liveness.report_healthy().await;
 
             if let Some(job) = self.queue.dequeue_tx(&self.name).await? {
                 return Ok(job);
@@ -141,16 +147,11 @@ impl<'p> WebhookWorker<'p> {
     }
 
     /// Run this worker to continuously process any jobs that become available.
-    pub async fn run(
-        &self,
-        transactional: bool,
-        liveness: HealthHandle,
-    ) -> Result<(), WorkerError> {
+    pub async fn run(&self, transactional: bool) -> Result<(), WorkerError> {
         let semaphore = Arc::new(sync::Semaphore::new(self.max_concurrent_jobs));
 
         if transactional {
             loop {
-                liveness.report_healthy().await;
                 let webhook_job = self.wait_for_job_tx().await?;
                 spawn_webhook_job_processing_task(
                     self.client.clone(),
@@ -162,7 +163,6 @@ impl<'p> WebhookWorker<'p> {
             }
         } else {
             loop {
-                liveness.report_healthy().await;
                 let webhook_job = self.wait_for_job().await?;
                 spawn_webhook_job_processing_task(
                     self.client.clone(),
@@ -436,6 +436,8 @@ mod tests {
     // This is due to a long-standing cargo bug that reports imports and helper functions as unused.
     // See: https://github.com/rust-lang/rust/issues/46379.
     #[allow(unused_imports)]
+    use hook_common::health::HealthRegistry;
+    #[allow(unused_imports)]
     use hook_common::pgqueue::{JobStatus, NewJob};
     #[allow(unused_imports)]
     use sqlx::PgPool;
@@ -508,6 +510,10 @@ mod tests {
             plugin_id: 2,
             plugin_config_id: 3,
         };
+        let registry = HealthRegistry::new("liveness");
+        let liveness = registry
+            .register("worker".to_string(), ::time::Duration::seconds(30))
+            .await;
         // enqueue takes ownership of the job enqueued to avoid bugs that can cause duplicate jobs.
         // Normally, a separate application would be enqueueing jobs for us to consume, so no ownership
         // conflicts would arise. However, in this test we need to do the enqueueing ourselves.
@@ -527,6 +533,7 @@ mod tests {
             time::Duration::from_millis(5000),
             10,
             RetryPolicy::default(),
+            liveness,
         );
 
         let consumed_job = worker
@@ -549,6 +556,8 @@ mod tests {
             .complete()
             .await
             .expect("job not successfully completed");
+
+        assert!(registry.get_status().healthy)
     }
 
     #[sqlx::test(migrations = "../migrations")]

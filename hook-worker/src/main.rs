@@ -41,6 +41,7 @@ async fn main() -> Result<(), WorkerError> {
         config.request_timeout.0,
         config.max_concurrent_jobs,
         retry_policy,
+        worker_liveness,
     );
 
     let router = Router::new()
@@ -55,7 +56,7 @@ async fn main() -> Result<(), WorkerError> {
             .expect("failed to start serving metrics");
     });
 
-    worker.run(config.transactional, worker_liveness).await?;
+    worker.run(config.transactional).await?;
 
     Ok(())
 }
