@@ -29,14 +29,10 @@ async fn main() -> Result<(), WorkerError> {
     )
     .maximum_interval(config.retry_policy.maximum_interval.0);
 
-    let retry_policy_builder = if let Some(retry_queue_name) = &config.retry_policy.retry_queue_name
-    {
-        retry_policy_builder.queue(retry_queue_name)
-    } else {
-        retry_policy_builder
+    let retry_policy_builder = match &config.retry_policy.retry_queue_name {
+        Some(retry_queue_name) => retry_policy_builder.queue(retry_queue_name),
+        None => retry_policy_builder,
     };
-
-    let retry_policy = retry_policy_builder.provide();
 
     let queue = PgQueue::new(&config.queue_name, &config.database_url)
         .await
@@ -48,7 +44,7 @@ async fn main() -> Result<(), WorkerError> {
         config.poll_interval.0,
         config.request_timeout.0,
         config.max_concurrent_jobs,
-        retry_policy,
+        retry_policy_builder.provide(),
         worker_liveness,
     );
 
