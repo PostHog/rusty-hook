@@ -2,6 +2,7 @@ use std::collections;
 use std::sync::Arc;
 use std::time;
 
+use hook_common::health::HealthHandle;
 use hook_common::{
     pgqueue::{Job, PgJob, PgJobError, PgQueue, PgQueueError, PgQueueJob, PgTransactionJob},
     retry::RetryPolicy,
@@ -140,11 +141,16 @@ impl<'p> WebhookWorker<'p> {
     }
 
     /// Run this worker to continuously process any jobs that become available.
-    pub async fn run(&self, transactional: bool) -> Result<(), WorkerError> {
+    pub async fn run(
+        &self,
+        transactional: bool,
+        liveness: HealthHandle,
+    ) -> Result<(), WorkerError> {
         let semaphore = Arc::new(sync::Semaphore::new(self.max_concurrent_jobs));
 
         if transactional {
             loop {
+                liveness.report_healthy().await;
                 let webhook_job = self.wait_for_job_tx().await?;
                 spawn_webhook_job_processing_task(
                     self.client.clone(),
@@ -156,8 +162,8 @@ impl<'p> WebhookWorker<'p> {
             }
         } else {
             loop {
+                liveness.report_healthy().await;
                 let webhook_job = self.wait_for_job().await?;
-
                 spawn_webhook_job_processing_task(
                     self.client.clone(),
                     semaphore.clone(),
