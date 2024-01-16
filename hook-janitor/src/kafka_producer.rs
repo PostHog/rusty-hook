@@ -51,7 +51,7 @@ pub async fn create_kafka_producer(
     let api: FutureProducer<KafkaContext> =
         client_config.create_with_context(KafkaContext { liveness })?;
 
-    // TODO: ping the kafka browkers to confirm configuration is OK (copy capture)
+    // TODO: ping the kafka brokers to confirm configuration is OK (copy capture)
 
     Ok(api)
 }
