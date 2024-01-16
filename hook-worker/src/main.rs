@@ -60,7 +60,7 @@ async fn main() -> Result<(), WorkerError> {
             .expect("failed to start serving metrics");
     });
 
-    worker.run(config.transactional).await?;
+    worker.run(config.transactional).await;
 
     Ok(())
 }
