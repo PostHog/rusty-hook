@@ -23,13 +23,13 @@ async fn main() -> Result<(), WorkerError> {
         .register("worker".to_string(), time::Duration::seconds(60)) // TODO: compute the value from worker params
         .await;
 
-    let retry_policy_builder = RetryPolicy::build(
+    let mut retry_policy_builder = RetryPolicy::build(
         config.retry_policy.backoff_coefficient,
         config.retry_policy.initial_interval.0,
     )
     .maximum_interval(config.retry_policy.maximum_interval.0);
 
-    let retry_policy_builder = match &config.retry_policy.retry_queue_name {
+    retry_policy_builder = match &config.retry_policy.retry_queue_name {
         Some(retry_queue_name) if !retry_queue_name.is_empty() => {
             retry_policy_builder.queue(retry_queue_name)
         }
