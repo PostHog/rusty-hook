@@ -195,9 +195,9 @@ impl WebhookCleaner {
         let base_query = r#"
         SELECT
             COALESCE(MIN(CASE WHEN attempt = 0 THEN created_at END), now()) AS oldest_created_at_untried,
-            SUM(CASE WHEN attempt = 0 THEN 1 ELSE 0 END) AS count_untried,
+            COALESCE(SUM(CASE WHEN attempt = 0 THEN 1 ELSE 0 END), 0) AS count_untried,
             COALESCE(MIN(CASE WHEN attempt > 0 THEN created_at END), now()) AS oldest_created_at_retries,
-            SUM(CASE WHEN attempt > 0 THEN 1 ELSE 0 END) AS count_retries
+            COALESCE(SUM(CASE WHEN attempt > 0 THEN 1 ELSE 0 END), 0) AS count_retries
         FROM job_queue
         WHERE status = 'available'
           AND queue = $1;
