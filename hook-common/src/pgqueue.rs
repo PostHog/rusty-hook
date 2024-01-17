@@ -30,6 +30,8 @@ pub enum PgQueueError {
 pub enum PgJobError<T> {
     #[error("retry is an invalid state for this PgJob: {error}")]
     RetryInvalidError { job: T, error: String },
+    #[error("connection failed with: {error}")]
+    ConnectionError { error: sqlx::Error },
     #[error("{command} query failed with: {error}")]
     QueryError { command: String, error: sqlx::Error },
     #[error("transaction {command} failed with: {error}")]
@@ -217,20 +219,34 @@ pub trait PgQueueJob {
 #[derive(Debug)]
 pub struct PgJob<J, M> {
     pub job: Job<J, M>,
-    pub connection: sqlx::pool::PoolConnection<sqlx::postgres::Postgres>,
+    pub pool: PgPool,
+}
+
+impl<J: std::marker::Send, M: std::marker::Send> PgJob<J, M> {
+    async fn acquire_conn(
+        &mut self,
+    ) -> Result<sqlx::pool::PoolConnection<sqlx::postgres::Postgres>, PgJobError<Box<PgJob<J, M>>>>
+    {
+        self.pool
+            .acquire()
+            .await
+            .map_err(|error| PgJobError::ConnectionError { error })
+    }
 }
 
 #[async_trait]
 impl<J: std::marker::Send, M: std::marker::Send> PgQueueJob for PgJob<J, M> {
     async fn complete(mut self) -> Result<CompletedJob, PgJobError<Box<PgJob<J, M>>>> {
-        let completed_job = self
-            .job
-            .complete(&mut *self.connection)
-            .await
-            .map_err(|error| PgJobError::QueryError {
-                command: "UPDATE".to_owned(),
-                error,
-            })?;
+        let mut connection = self.acquire_conn().await?;
+
+        let completed_job =
+            self.job
+                .complete(&mut *connection)
+                .await
+                .map_err(|error| PgJobError::QueryError {
+                    command: "UPDATE".to_owned(),
+                    error,
+                })?;
 
         Ok(completed_job)
     }
@@ -239,9 +255,11 @@ impl<J: std::marker::Send, M: std::marker::Send> PgQueueJob for PgJob<J, M> {
         mut self,
         error: E,
     ) -> Result<FailedJob<E>, PgJobError<Box<PgJob<J, M>>>> {
+        let mut connection = self.acquire_conn().await?;
+
         let failed_job = self
             .job
-            .fail(error, &mut *self.connection)
+            .fail(error, &mut *connection)
             .await
             .map_err(|error| PgJobError::QueryError {
                 command: "UPDATE".to_owned(),
@@ -264,11 +282,13 @@ impl<J: std::marker::Send, M: std::marker::Send> PgQueueJob for PgJob<J, M> {
             });
         }
 
+        let mut connection = self.acquire_conn().await?;
+
         let retried_job = self
             .job
             .retryable()
             .queue(queue)
-            .retry(error, retry_interval, &mut *self.connection)
+            .retry(error, retry_interval, &mut *connection)
             .await
             .map_err(|error| PgJobError::QueryError {
                 command: "UPDATE".to_owned(),
@@ -600,7 +620,10 @@ RETURNING
             .await;
 
         match query_result {
-            Ok(job) => Ok(Some(PgJob { job, connection })),
+            Ok(job) => Ok(Some(PgJob {
+                job,
+                pool: self.pool.clone(),
+            })),
 
             // Although connection would be closed once it goes out of scope, sqlx recommends explicitly calling close().
             // See: https://docs.rs/sqlx/latest/sqlx/postgres/any/trait.AnyConnectionBackend.html#tymethod.close.
