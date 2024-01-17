@@ -30,9 +30,7 @@ async fn main() -> Result<(), WorkerError> {
     .maximum_interval(config.retry_policy.maximum_interval.0);
 
     retry_policy_builder = match &config.retry_policy.retry_queue_name {
-        Some(retry_queue_name) if !retry_queue_name.is_empty() => {
-            retry_policy_builder.queue(retry_queue_name)
-        }
+        Some(retry_queue_name) => retry_policy_builder.queue(retry_queue_name),
         _ => retry_policy_builder,
     };
 
