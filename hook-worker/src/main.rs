@@ -42,6 +42,7 @@ async fn main() -> Result<(), WorkerError> {
     let worker = WebhookWorker::new(
         &config.worker_name,
         &queue,
+        config.dequeue_count,
         config.poll_interval.0,
         config.request_timeout.0,
         config.max_concurrent_jobs,

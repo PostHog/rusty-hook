@@ -68,6 +68,8 @@ pub struct WebhookWorker<'p> {
     name: String,
     /// The queue we will be dequeuing jobs from.
     queue: &'p PgQueue,
+    /// The maximum number of jobs to dequeue in one query.
+    dequeue_count: u32,
     /// The interval for polling the queue.
     poll_interval: time::Duration,
     /// The client used for HTTP requests.
@@ -81,9 +83,11 @@ pub struct WebhookWorker<'p> {
 }
 
 impl<'p> WebhookWorker<'p> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         name: &str,
         queue: &'p PgQueue,
+        dequeue_count: u32,
         poll_interval: time::Duration,
         request_timeout: time::Duration,
         max_concurrent_jobs: usize,
@@ -106,6 +110,7 @@ impl<'p> WebhookWorker<'p> {
         Self {
             name: name.to_owned(),
             queue,
+            dequeue_count,
             poll_interval,
             client,
             max_concurrent_jobs,
@@ -114,15 +119,15 @@ impl<'p> WebhookWorker<'p> {
         }
     }
 
-    /// Wait until a job becomes available in our queue.
-    async fn wait_for_job<'a>(&self) -> PgJob<WebhookJobParameters, WebhookJobMetadata> {
+    /// Wait until at least one job becomes available in our queue.
+    async fn wait_for_jobs<'a>(&self) -> Vec<PgJob<WebhookJobParameters, WebhookJobMetadata>> {
         let mut interval = tokio::time::interval(self.poll_interval);
 
         loop {
             interval.tick().await;
             self.liveness.report_healthy().await;
 
-            match self.queue.dequeue(&self.name).await {
+            match self.queue.dequeue(&self.name, self.dequeue_count).await {
                 Ok(Some(job)) => return job,
                 Ok(None) => continue,
                 Err(error) => {
@@ -133,17 +138,17 @@ impl<'p> WebhookWorker<'p> {
         }
     }
 
-    /// Wait until a job becomes available in our queue in transactional mode.
-    async fn wait_for_job_tx<'a>(
+    /// Wait until at least one job becomes available in our queue in transactional mode.
+    async fn wait_for_jobs_tx<'a>(
         &self,
-    ) -> PgTransactionJob<'a, WebhookJobParameters, WebhookJobMetadata> {
+    ) -> Vec<PgTransactionJob<'a, WebhookJobParameters, WebhookJobMetadata>> {
         let mut interval = tokio::time::interval(self.poll_interval);
 
         loop {
             interval.tick().await;
             self.liveness.report_healthy().await;
 
-            match self.queue.dequeue_tx(&self.name).await {
+            match self.queue.dequeue_tx(&self.name, self.dequeue_count).await {
                 Ok(Some(job)) => return job,
                 Ok(None) => continue,
                 Err(error) => {
@@ -165,26 +170,30 @@ impl<'p> WebhookWorker<'p> {
         if transactional {
             loop {
                 report_semaphore_utilization();
-                let webhook_job = self.wait_for_job_tx().await;
-                spawn_webhook_job_processing_task(
-                    self.client.clone(),
-                    semaphore.clone(),
-                    self.retry_policy.clone(),
-                    webhook_job,
-                )
-                .await;
+                let webhook_jobs = self.wait_for_jobs_tx().await;
+                for webhook_job in webhook_jobs {
+                    spawn_webhook_job_processing_task(
+                        self.client.clone(),
+                        semaphore.clone(),
+                        self.retry_policy.clone(),
+                        webhook_job,
+                    )
+                    .await;
+                }
             }
         } else {
             loop {
                 report_semaphore_utilization();
-                let webhook_job = self.wait_for_job().await;
-                spawn_webhook_job_processing_task(
-                    self.client.clone(),
-                    semaphore.clone(),
-                    self.retry_policy.clone(),
-                    webhook_job,
-                )
-                .await;
+                let webhook_jobs = self.wait_for_jobs().await;
+                for webhook_job in webhook_jobs {
+                    spawn_webhook_job_processing_task(
+                        self.client.clone(),
+                        semaphore.clone(),
+                        self.retry_policy.clone(),
+                        webhook_job,
+                    )
+                    .await;
+                }
             }
         }
     }
@@ -543,6 +552,7 @@ mod tests {
         let worker = WebhookWorker::new(
             &worker_id,
             &queue,
+            1,
             time::Duration::from_millis(100),
             time::Duration::from_millis(5000),
             10,
@@ -550,7 +560,9 @@ mod tests {
             liveness,
         );
 
-        let consumed_job = worker.wait_for_job().await;
+        let mut consumed_jobs = worker.wait_for_jobs().await;
+
+        let consumed_job = consumed_jobs.pop().unwrap();
 
         assert_eq!(consumed_job.job.attempt, 1);
         assert!(consumed_job.job.attempted_by.contains(&worker_id));
