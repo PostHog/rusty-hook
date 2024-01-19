@@ -373,15 +373,16 @@ impl WebhookCleaner {
         // of rows in memory. It seems unlikely we'll need to paginate, but that can be added in the
         // future if necessary.
 
+        let untried_status = [("status", "untried")];
+        let retries_status = [("status", "retries")];
+
         let queue_depth = self.get_queue_depth().await?;
-        metrics::gauge!("queue_depth_oldest_scheduled_at_untried")
+        metrics::gauge!("queue_depth_oldest_scheduled", &untried_status)
             .set(queue_depth.oldest_scheduled_at_untried.timestamp() as f64);
-        metrics::gauge!("queue_depth", &[("status", "untried")])
-            .set(queue_depth.count_untried as f64);
-        metrics::gauge!("queue_depth_oldest_scheduled_at_retries")
+        metrics::gauge!("queue_depth", &untried_status).set(queue_depth.count_untried as f64);
+        metrics::gauge!("queue_depth_oldest_scheduled", &retries_status)
             .set(queue_depth.oldest_scheduled_at_retries.timestamp() as f64);
-        metrics::gauge!("queue_depth", &[("status", "retries")])
-            .set(queue_depth.count_retries as f64);
+        metrics::gauge!("queue_depth", &retries_status).set(queue_depth.count_retries as f64);
 
         let mut tx = self.start_serializable_txn().await?;
 
