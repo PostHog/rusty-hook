@@ -190,6 +190,18 @@ impl WebhookCleaner {
             .await
             .map_err(|e| WebhookCleanerError::AcquireConnError { error: e })?;
 
+        // The "non-transactional" worker runs the risk of crashing and leaving jobs permanently in
+        // the `running` state. This query will reschedule any jobs that have been in the running
+        // state for more than 2 minutes (which is *much* longer than we expect any Webhook job to
+        // take).
+        //
+        // We don't need to increment the `attempt` counter here because the worker already did that
+        // when it moved the job into `running`.
+        //
+        // If the previous worker was somehow stalled for 2 minutes and completes the task, that
+        // will mean we sent duplicate Webhooks. Success stats should not be affected, since both
+        // will update the same job row, which will only be processed once by the janitor.
+
         let base_query = r#"
         UPDATE
             job_queue
