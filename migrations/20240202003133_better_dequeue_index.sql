@@ -1,4 +1,5 @@
-DROP INDEX CONCURRENTLY idx_queue_scheduled_at;
+-- Dequeue is not hitting this index, so dropping is safe this time.
+DROP INDEX idx_queue_scheduled_at;
 
 /*
 Partial index used for dequeuing from job_queue.
