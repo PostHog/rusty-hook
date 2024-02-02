@@ -39,7 +39,7 @@ pub struct Config {
     pub transactional: bool,
 
     #[envconfig(default = "10")]
-    pub dequeue_count: u32,
+    pub dequeue_batch_size: u32,
 }
 
 impl Config {

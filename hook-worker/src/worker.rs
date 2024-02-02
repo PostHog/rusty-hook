@@ -71,7 +71,7 @@ pub struct WebhookWorker<'p> {
     /// The queue we will be dequeuing jobs from.
     queue: &'p PgQueue,
     /// The maximum number of jobs to dequeue in one query.
-    dequeue_count: u32,
+    dequeue_batch_size: u32,
     /// The interval for polling the queue.
     poll_interval: time::Duration,
     /// The client used for HTTP requests.
@@ -89,7 +89,7 @@ impl<'p> WebhookWorker<'p> {
     pub fn new(
         name: &str,
         queue: &'p PgQueue,
-        dequeue_count: u32,
+        dequeue_batch_size: u32,
         poll_interval: time::Duration,
         request_timeout: time::Duration,
         max_concurrent_jobs: usize,
@@ -112,7 +112,7 @@ impl<'p> WebhookWorker<'p> {
         Self {
             name: name.to_owned(),
             queue,
-            dequeue_count,
+            dequeue_batch_size,
             poll_interval,
             client,
             max_concurrent_jobs,
@@ -129,7 +129,11 @@ impl<'p> WebhookWorker<'p> {
             interval.tick().await;
             self.liveness.report_healthy().await;
 
-            match self.queue.dequeue(&self.name, self.dequeue_count).await {
+            match self
+                .queue
+                .dequeue(&self.name, self.dequeue_batch_size)
+                .await
+            {
                 Ok(Some(batch)) => return batch,
                 Ok(None) => continue,
                 Err(error) => {
@@ -150,7 +154,11 @@ impl<'p> WebhookWorker<'p> {
             interval.tick().await;
             self.liveness.report_healthy().await;
 
-            match self.queue.dequeue_tx(&self.name, self.dequeue_count).await {
+            match self
+                .queue
+                .dequeue_tx(&self.name, self.dequeue_batch_size)
+                .await
+            {
                 Ok(Some(batch)) => return batch,
                 Ok(None) => continue,
                 Err(error) => {
@@ -169,10 +177,13 @@ impl<'p> WebhookWorker<'p> {
                 .set(1f64 - semaphore.available_permits() as f64 / self.max_concurrent_jobs as f64);
         };
 
+        let dequeue_batch_size_histogram = metrics::histogram!("webhook_dequeue_batch_size");
+
         if transactional {
             loop {
                 report_semaphore_utilization();
                 let mut batch = self.wait_for_jobs_tx().await;
+                dequeue_batch_size_histogram.record(batch.jobs.len() as f64);
 
                 // Get enough permits for the jobs before spawning a task.
                 let permits = semaphore
@@ -217,6 +228,7 @@ impl<'p> WebhookWorker<'p> {
             loop {
                 report_semaphore_utilization();
                 let batch = self.wait_for_jobs().await;
+                dequeue_batch_size_histogram.record(batch.jobs.len() as f64);
 
                 // Get enough permits for the jobs before spawning a task.
                 let permits = semaphore

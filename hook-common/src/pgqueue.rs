@@ -1,7 +1,6 @@
 //! # PgQueue
 //!
 //! A job queue implementation backed by a PostgreSQL table.
-use std::ops::DerefMut;
 use std::time;
 use std::{str::FromStr, sync::Arc};
 
@@ -320,7 +319,7 @@ pub struct PgTransactionJob<'c, J, M> {
     /// The open transaction this job came from. If multiple jobs were queried at once, then this
     /// transaction will be shared between them (across async tasks and threads as necessary). See
     /// below for more information.
-    shared_txn: Arc<Mutex<SharedTxn<'c>>>,
+    shared_txn: Arc<Mutex<Option<sqlx::Transaction<'c, sqlx::postgres::Postgres>>>>,
 }
 
 // Container struct for a batch of PgTransactionJob. Includes a reference to the shared transaction
@@ -330,57 +329,20 @@ pub struct PgTransactionBatch<'c, J, M> {
 
     /// The open transaction the jobs in the Vec came from. This should be used to commit or
     /// rollback when all of the work is finished.
-    shared_txn: Arc<Mutex<SharedTxn<'c>>>,
+    shared_txn: Arc<Mutex<Option<sqlx::Transaction<'c, sqlx::postgres::Postgres>>>>,
 }
 
 impl<'c, J, M> PgTransactionBatch<'_, J, M> {
     pub async fn commit(&mut self) -> PgQueueResult<()> {
         let mut txn_guard = self.shared_txn.lock().await;
-        txn_guard.commit().await
-    }
-}
 
-/// A shared transaction. Exists as a named type so that it can have some helper methods.
-#[derive(Debug)]
-struct SharedTxn<'c> {
-    /// The actual transaction object. If a transaction error occurs (e.g. the connection drops)
-    /// then the transaction should be dropped so that other jobs don't each try to do DB work that
-    /// is bound to fail.
-    raw_txn: Option<sqlx::Transaction<'c, sqlx::postgres::Postgres>>,
-}
-
-impl SharedTxn<'_> {
-    /// Commits and then drops the transaction.
-    pub async fn commit(&mut self) -> PgQueueResult<()> {
-        if self.raw_txn.is_none() {
-            return Err(PgQueueError::TransactionAlreadyClosedError);
-        }
-
-        let txn = self.raw_txn.take().unwrap();
+        let txn = txn_guard.take().unwrap();
         txn.commit().await.map_err(|e| PgQueueError::QueryError {
             command: "COMMIT".to_owned(),
             error: e,
         })?;
 
         Ok(())
-    }
-
-    /// See `raw_txn` above, this should be called when a transaction error occurs (e.g. the
-    /// connection drops) so that other jobs don't each try to do DB work that is bound to fail.
-    fn drop_txn(&mut self) {
-        self.raw_txn = None;
-    }
-}
-
-impl SharedTxn<'_> {
-    /// Helper to get the transaction reference if it exists, for use in sqlx queries.
-    /// If it doesn't exist, that means a previous error occurred and the transaction has been
-    /// dropped.
-    fn get_txn_ref(&mut self) -> Option<&mut sqlx::PgConnection> {
-        match self.raw_txn.as_mut() {
-            Some(txn) => Some(txn.deref_mut()),
-            None => None,
-        }
     }
 }
 
@@ -392,17 +354,17 @@ impl<'c, J: std::marker::Send, M: std::marker::Send> PgQueueJob for PgTransactio
         let mut txn_guard = self.shared_txn.lock().await;
 
         let txn_ref = txn_guard
-            .get_txn_ref()
+            .as_deref_mut()
             .ok_or(PgJobError::TransactionAlreadyClosedError)?;
 
-        let completed_job = self.job.complete(txn_ref).await.map_err(|error| {
-            txn_guard.drop_txn();
-
-            PgJobError::QueryError {
-                command: "UPDATE".to_owned(),
-                error,
-            }
-        })?;
+        let completed_job =
+            self.job
+                .complete(txn_ref)
+                .await
+                .map_err(|error| PgJobError::QueryError {
+                    command: "UPDATE".to_owned(),
+                    error,
+                })?;
 
         Ok(completed_job)
     }
@@ -414,17 +376,17 @@ impl<'c, J: std::marker::Send, M: std::marker::Send> PgQueueJob for PgTransactio
         let mut txn_guard = self.shared_txn.lock().await;
 
         let txn_ref = txn_guard
-            .get_txn_ref()
+            .as_deref_mut()
             .ok_or(PgJobError::TransactionAlreadyClosedError)?;
 
-        let failed_job = self.job.fail(error, txn_ref).await.map_err(|error| {
-            txn_guard.drop_txn();
-
-            PgJobError::QueryError {
-                command: "UPDATE".to_owned(),
-                error,
-            }
-        })?;
+        let failed_job =
+            self.job
+                .fail(error, txn_ref)
+                .await
+                .map_err(|error| PgJobError::QueryError {
+                    command: "UPDATE".to_owned(),
+                    error,
+                })?;
 
         Ok(failed_job)
     }
@@ -447,7 +409,7 @@ impl<'c, J: std::marker::Send, M: std::marker::Send> PgQueueJob for PgTransactio
         let mut txn_guard = self.shared_txn.lock().await;
 
         let txn_ref = txn_guard
-            .get_txn_ref()
+            .as_deref_mut()
             .ok_or(PgJobError::TransactionAlreadyClosedError)?;
 
         let retried_job = self
@@ -456,13 +418,9 @@ impl<'c, J: std::marker::Send, M: std::marker::Send> PgQueueJob for PgTransactio
             .queue(queue)
             .retry(error, retry_interval, txn_ref)
             .await
-            .map_err(|error| {
-                txn_guard.drop_txn();
-
-                PgJobError::QueryError {
-                    command: "UPDATE".to_owned(),
-                    error,
-                }
+            .map_err(|error| PgJobError::QueryError {
+                command: "UPDATE".to_owned(),
+                error,
             })?;
 
         Ok(retried_job)
@@ -803,7 +761,7 @@ RETURNING
                     return Ok(None);
                 }
 
-                let shared_txn = Arc::new(Mutex::new(SharedTxn { raw_txn: Some(tx) }));
+                let shared_txn = Arc::new(Mutex::new(Some(tx)));
 
                 let pg_jobs: Vec<PgTransactionJob<J, M>> = jobs
                     .into_iter()
