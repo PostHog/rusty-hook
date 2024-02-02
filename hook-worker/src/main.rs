@@ -38,6 +38,7 @@ async fn main() -> Result<(), WorkerError> {
     let queue = PgQueue::new(
         config.queue_name.as_str(),
         &config.database_url,
+        config.max_pg_connections,
         "hook-worker",
     )
     .await
