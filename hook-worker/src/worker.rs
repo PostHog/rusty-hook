@@ -182,6 +182,10 @@ impl<'p> WebhookWorker<'p> {
         if transactional {
             loop {
                 report_semaphore_utilization();
+                // TODO: We could grab semaphore permits here using something like:
+                //   `min(semaphore.available_permits(), dequeue_batch_size)`
+                // And then dequeue only up to that many jobs. We'd then need to hand back the
+                // difference in permits based on how many jobs were dequeued.
                 let mut batch = self.wait_for_jobs_tx().await;
                 dequeue_batch_size_histogram.record(batch.jobs.len() as f64);
 
@@ -227,6 +231,10 @@ impl<'p> WebhookWorker<'p> {
         } else {
             loop {
                 report_semaphore_utilization();
+                // TODO: We could grab semaphore permits here using something like:
+                //   `min(semaphore.available_permits(), dequeue_batch_size)`
+                // And then dequeue only up to that many jobs. We'd then need to hand back the
+                // difference in permits based on how many jobs were dequeued.
                 let batch = self.wait_for_jobs().await;
                 dequeue_batch_size_histogram.record(batch.jobs.len() as f64);
 
