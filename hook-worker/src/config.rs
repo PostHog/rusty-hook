@@ -38,7 +38,7 @@ pub struct Config {
     #[envconfig(default = "true")]
     pub transactional: bool,
 
-    #[envconfig(default = "10")]
+    #[envconfig(default = "1")]
     pub dequeue_batch_size: u32,
 }
 
