@@ -267,7 +267,7 @@ async fn process_webhook_job<W: WebhookJob>(
         Ok(_) => {
             let end_to_end_duration = Utc::now() - webhook_job.metadata().created_at;
             metrics::histogram!("webhook_jobs_end_to_end_duration_seconds", &labels)
-                .record((end_to_end_duration.num_milliseconds() as f64) / (1_000 as f64));
+                .record((end_to_end_duration.num_milliseconds() as f64) / 1_000_f64);
 
             webhook_job
                 .complete()
