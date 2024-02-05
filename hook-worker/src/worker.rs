@@ -6,7 +6,9 @@ use futures::future::join_all;
 use hook_common::health::HealthHandle;
 use hook_common::pgqueue::PgTransactionBatch;
 use hook_common::{
-    pgqueue::{Job, PgJobError, PgQueue, PgQueueError, PgQueueJob, PgTransactionJob},
+    pgqueue::{
+        DatabaseError, Job, PgQueue, PgQueueJob, PgTransactionJob, RetryError, RetryInvalidError,
+    },
     retry::RetryPolicy,
     webhook::{HttpMethod, WebhookJobError, WebhookJobMetadata, WebhookJobParameters},
 };
@@ -232,10 +234,10 @@ async fn process_webhook_job<W: WebhookJob>(
 
     match send_result {
         Ok(_) => {
-            webhook_job
-                .complete()
-                .await
-                .map_err(|error| WorkerError::PgJobError(error.to_string()))?;
+            webhook_job.complete().await.map_err(|error| {
+                metrics::counter!("webhook_jobs_database_error", &labels).increment(1);
+                error
+            })?;
 
             metrics::counter!("webhook_jobs_completed", &labels).increment(1);
             metrics::histogram!("webhook_jobs_processing_duration_seconds", &labels)
@@ -249,7 +251,7 @@ async fn process_webhook_job<W: WebhookJob>(
                 .await
                 .map_err(|job_error| {
                     metrics::counter!("webhook_jobs_database_error", &labels).increment(1);
-                    WorkerError::PgJobError(job_error.to_string())
+                    job_error
                 })?;
 
             metrics::counter!("webhook_jobs_failed", &labels).increment(1);
@@ -262,7 +264,7 @@ async fn process_webhook_job<W: WebhookJob>(
                 .await
                 .map_err(|job_error| {
                     metrics::counter!("webhook_jobs_database_error", &labels).increment(1);
-                    WorkerError::PgJobError(job_error.to_string())
+                    job_error
                 })?;
 
             metrics::counter!("webhook_jobs_failed", &labels).increment(1);
@@ -275,7 +277,7 @@ async fn process_webhook_job<W: WebhookJob>(
                 .await
                 .map_err(|job_error| {
                     metrics::counter!("webhook_jobs_database_error", &labels).increment(1);
-                    WorkerError::PgJobError(job_error.to_string())
+                    job_error
                 })?;
 
             metrics::counter!("webhook_jobs_failed", &labels).increment(1);
@@ -297,25 +299,24 @@ async fn process_webhook_job<W: WebhookJob>(
 
                     Ok(())
                 }
-                Err(PgJobError::RetryInvalidError {
+                Err(RetryError::RetryInvalidError(RetryInvalidError {
                     job: webhook_job, ..
-                }) => {
+                })) => {
                     webhook_job
                         .fail(WebhookJobError::from(&error))
                         .await
                         .map_err(|job_error| {
                             metrics::counter!("webhook_jobs_database_error", &labels).increment(1);
-                            WorkerError::PgJobError(job_error.to_string())
+                            job_error
                         })?;
 
                     metrics::counter!("webhook_jobs_failed", &labels).increment(1);
 
                     Ok(())
                 }
-                Err(job_error) => {
+                Err(RetryError::DatabaseError(job_error)) => {
                     metrics::counter!("webhook_jobs_database_error", &labels).increment(1);
-
-                    Err(WorkerError::PgJobError(job_error.to_string()))
+                    Err(WorkerError::from(job_error))
                 }
             }
         }
@@ -325,7 +326,7 @@ async fn process_webhook_job<W: WebhookJob>(
                 .await
                 .map_err(|job_error| {
                     metrics::counter!("webhook_jobs_database_error", &labels).increment(1);
-                    WorkerError::PgJobError(job_error.to_string())
+                    job_error
                 })?;
 
             metrics::counter!("webhook_jobs_failed", &labels).increment(1);
@@ -455,7 +456,7 @@ mod tests {
         max_attempts: i32,
         job_parameters: WebhookJobParameters,
         job_metadata: WebhookJobMetadata,
-    ) -> Result<(), PgQueueError> {
+    ) -> Result<(), DatabaseError> {
         let job_target = job_parameters.url.to_owned();
         let new_job = NewJob::new(max_attempts, job_metadata, job_parameters, &job_target);
         queue.enqueue(new_job).await?;
@@ -496,9 +497,7 @@ mod tests {
     async fn test_wait_for_job(db: PgPool) {
         let worker_id = worker_id();
         let queue_name = "test_wait_for_job".to_string();
-        let queue = PgQueue::new_from_pool(&queue_name, db)
-            .await
-            .expect("failed to connect to PG");
+        let queue = PgQueue::new_from_pool(&queue_name, db).await;
 
         let webhook_job_parameters = WebhookJobParameters {
             body: "a webhook job body. much wow.".to_owned(),
