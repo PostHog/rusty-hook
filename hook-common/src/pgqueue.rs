@@ -126,7 +126,17 @@ impl<J, M> Job<J, M> {
     }
 
     /// Consume `Job` to transition it to a `RetryableJob`, i.e. a `Job` that may be retried.
-    fn retryable(self) -> RetryableJob {
+    ///
+    /// # Panics
+    ///
+    /// This method will panic if `Job` cannot be retried anymore, for example, because it has reached its max attempts.
+    fn retryable_unchecked(self) -> RetryableJob {
+        if self.is_gte_max_attempts() {
+            // TODO: Figure out a way of returning ownership on error or not needing it in the first place.
+            // Perhaps with a different API, like retry_or_fail(), so we don't need to return the job.
+            panic!("Job cannot be retried further");
+        }
+
         RetryableJob {
             id: self.id,
             attempt: self.attempt,
@@ -282,7 +292,7 @@ impl<J: std::marker::Send, M: std::marker::Send> PgQueueJob for PgJob<J, M> {
 
         let retried_job = self
             .job
-            .retryable()
+            .retryable_unchecked()
             .queue(queue)
             .retry(error, retry_interval, &mut *self.connection)
             .await
@@ -356,8 +366,6 @@ impl<'c, J: std::marker::Send, M: std::marker::Send> PgQueueJob for PgTransactio
         retry_interval: time::Duration,
         queue: &str,
     ) -> Result<RetriedJob, RetryError<Box<PgTransactionJob<'c, J, M>>>> {
-        // Ideally, the transition to RetryableJob should be fallible.
-        // But taking ownership of self when we return this error makes things difficult.
         if self.job.is_gte_max_attempts() {
             return Err(RetryError::from(RetryInvalidError {
                 job: Box::new(self),
@@ -367,7 +375,7 @@ impl<'c, J: std::marker::Send, M: std::marker::Send> PgQueueJob for PgTransactio
 
         let retried_job = self
             .job
-            .retryable()
+            .retryable_unchecked()
             .queue(queue)
             .retry(error, retry_interval, &mut *self.transaction)
             .await
